@@ -1,2 +1,2 @@
-it is for wallet
+wallet system to be implemented
 
