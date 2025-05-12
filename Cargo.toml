@@ -22,6 +22,11 @@ async-trait = "0.1"
 jsonwebtoken = "8.3"
 lazy_static = "1.4"
 dotenv = "0.15"
+# These are needed for your matching engine implementation
+rust_decimal = "1.30"
+rust_decimal_macros = "1.30"
+anyhow = "1.0"
+clap = { version = "4.3", features = ["derive"] }
 
 [lib]
 name = "crypto_exchange"
@@ -29,4 +34,4 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "crypto_exchange"
-path = "src/main.rs"
+path = "src/main.rs
