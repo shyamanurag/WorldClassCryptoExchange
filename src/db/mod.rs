@@ -394,6 +394,103 @@ pub mod repositories {
             Ok(wallet)
         }
     }
+    // src/db/mod.rs - Database layer
+use anyhow::{Context, Result};
+use sqlx::{
+    migrate::MigrateDatabase,
+    postgres::{PgPool, PgPoolOptions},
+    Postgres,
+};
+use log::{info, error, debug};
+use std::time::Duration;
+
+pub mod models;
+pub mod repositories;
+
+// Re-exports from repositories
+pub use repositories::user_repository::UserRepository;
+pub use repositories::asset_repository::AssetRepository;
+pub use repositories::trading_pair_repository::TradingPairRepository;
+pub use repositories::order_repository::OrderRepository;
+pub use repositories::trade_repository::TradeRepository;
+pub use repositories::wallet_repository::WalletRepository;
+pub use repositories::account_repository::AccountRepository;
+pub use repositories::deposit_repository::DepositRepository;
+pub use repositories::withdrawal_repository::WithdrawalRepository;
+
+const MAX_CONNECTIONS: u32 = 20;
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
+const POSTGRES_DB_NAME: &str = "crypto_exchange";
+
+/// Initialize database connection
+pub async fn init_database(database_url: &str) -> Result<PgPool> {
+    info!("Initializing database connection");
+    debug!("Database URL: {}", database_url);
     
+    // Check if database exists, if not, create it
+    if !Postgres::database_exists(database_url).await? {
+        info!("Database does not exist, creating it");
+        Postgres::create_database(database_url).await?;
+    }
+    
+    // Create connection pool
+    let pool = PgPoolOptions::new()
+        .max_connections(MAX_CONNECTIONS)
+        .connect_timeout(CONNECTION_TIMEOUT)
+        .connect(database_url)
+        .await
+        .context("Failed to connect to database")?;
+    
+    // Run migrations
+    info!("Running database migrations");
+    run_migrations(&pool).await?;
+    
+    info!("Database initialization complete");
+    Ok(pool)
+}
+
+/// Run database migrations
+async fn run_migrations(pool: &PgPool) -> Result<()> {
+    // Use sqlx migrations or run custom SQL
+    sqlx::migrate!("./migrations")
+        .run(pool)
+        .await
+        .context("Failed to run database migrations")?;
+    
+    Ok(())
+}
+
+/// Create test database for unit tests
+#[cfg(test)]
+pub async fn create_test_database() -> Result<PgPool> {
+    use sqlx::migrate::Migrator;
+    use std::path::Path;
+    
+    let db_name = format!("test_db_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+    let database_url = format!("postgres://postgres:postgres@localhost:5432/{}", db_name);
+    
+    // Create database
+    Postgres::create_database(&database_url).await?;
+    
+    // Connect to database
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_timeout(Duration::from_secs(5))
+        .connect(&database_url)
+        .await?;
+    
+    // Run migrations
+    let migrator = Migrator::new(Path::new("./migrations")).await?;
+    migrator.run(&pool).await?;
+    
+    Ok(pool)
+}
+
+/// Drop test database after tests
+#[cfg(test)]
+pub async fn drop_test_database(database_url: &str) -> Result<()> {
+    Postgres::drop_database(database_url).await?;
+    Ok(())
+}
     // More repositories can be added here for Order, Trade, etc.
 }
