@@ -1,63 +1,63 @@
-use anyhow::Result;
-use clap::{Parser, Subcommand};
-use log::info;
-
-mod config;
-mod trading_engine;
-mod wallet;
-mod api;
-mod security;
-mod db;
-mod utils;
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    component: Component,
-}
-
-#[derive(Subcommand)]
-enum Component {
-    /// Run the trading engine component
-    TradingEngine,
-    
-    /// Run the wallet system component
-    WalletSystem,
-    
-    /// Run the API gateway component
-    ApiGateway,
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Initialize logging
-    utils::logging::init_logger();
-    
-    // Parse command line arguments
-    let cli = Cli::parse();
-    
-    // Load configuration
-    let config = config::load_config()?;
-    
-    // Initialize metrics
-    utils::metrics::init_metrics(&config)?;
-    
-    // Run the selected component
-    match cli.component {
-        Component::TradingEngine => {
-            info!("Starting trading engine...");
-            trading_engine::run(config).await?;
-        },
-        Component::WalletSystem => {
-            info!("Starting wallet system...");
-            wallet::run(config).await?;
-        },
-        Component::ApiGateway => {
-            info!("Starting API gateway...");
-            api::run(config).await?;
+ for pair in config.trading_pairs.clone() {
+                info!("Adding trading pair: {}", pair);
+                manager.add_symbol(pair).await?;
+            }
+            
+            // Initialize wallet system
+            let wallet_handle = tokio::spawn(async move {
+                if let Err(e) = wallet::run(config.clone(), false).await {
+                    error!("Wallet system error: {}", e);
+                }
+            });
+            
+            // Initialize API service
+            let mut api_service = api::ApiService::new(
+                Arc::clone(&manager),
+                user_repo,
+                asset_repo,
+                trading_pair_repo,
+                order_repo,
+                trade_repo,
+                wallet_repo,
+                account_repo,
+                deposit_repo,
+                withdrawal_repo,
+                Arc::clone(&auth_service),
+            );
+            
+            // Start API service
+            api_service.start("0.0.0.0", port).await?;
+            
+            info!("All components started successfully");
+            
+            // Wait for shutdown signal
+            wait_for_shutdown().await?;
+            
+            // Shutdown API service
+            api_service.stop().await?;
+            
+            // Wait for wallet system to shut down
+            if let Err(e) = wallet_handle.await {
+                error!("Error waiting for wallet system to shut down: {}", e);
+            }
         },
     }
     
+    info!("WorldClass Crypto Exchange shut down gracefully");
+    
     Ok(())
+}
+
+/// Wait for shutdown signal (Ctrl+C)
+async fn wait_for_shutdown() -> Result<()> {
+    match signal::ctrl_c().await {
+        Ok(()) => {
+            info!("Shutdown signal received, starting graceful shutdown");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to listen for shutdown signal: {}", e);
+            Err(anyhow::anyhow!("Failed to listen for shutdown signal"))
+        }
+    }
 }
