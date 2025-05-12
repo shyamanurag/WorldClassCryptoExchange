@@ -35,3 +35,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "crypto_exchange"
 path = "src/main.rs
+tokio = { version = "1.28", features = ["full"] }
+clap = "3.2"
+log = "0.4"
