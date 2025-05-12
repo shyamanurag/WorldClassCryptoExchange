@@ -1,0 +1,114 @@
+/* src/assets/styles/index.css */
+:root {
+  --primary-color: #1c65f2;
+  --secondary-color: #41d0d8;
+  --background-dark: #121826;
+  --background-light: #f7f9fc;
+  --text-dark: #121826;
+  --text-light: #f7f9fc;
+  --success-color: #00c853;
+  --warning-color: #ffab00;
+  --error-color: #ff3d00;
+  --card-dark: #1e2334;
+  --card-light: #ffffff;
+  --border-dark: #2a3043;
+  --border-light: #e0e3eb;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease;
+}
+
+body.light {
+  background-color: var(--background-light);
+  color: var(--text-dark);
+}
+
+body.dark {
+  background-color: var(--background-dark);
+  color: var(--text-light);
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+a {
+  text-decoration: none;
+  color: var(--primary-color);
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+}
+
+.container {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+/* Grid system */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0 -0.5rem;
+}
+
+.col {
+  flex: 1 0 0%;
+  padding: 0 0.5rem;
+}
+
+/* Responsive breakpoints */
+@media (max-width: 768px) {
+  .row {
+    flex-direction: column;
+  }
+}
+
+/* Trading specific styles */
+.buy {
+  color: var(--success-color);
+}
+
+.sell {
+  color: var(--error-color);
+}
+
+/* Order book styles */
+.order-book-row {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  padding: 0.25rem 0.5rem;
+}
+
+.depth-visualization {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: -1;
+  opacity: 0.2;
+}
+
+.ask .depth-visualization {
+  right: 0;
+  background-color: var(--error-color);
+}
+
+.bid .depth-visualization {
+  left: 0;
+  background-color: var(--success-color);
+}
