@@ -16,14 +16,12 @@ You've successfully set up:
 
 The trading engine is the heart of the exchange. Focus on implementing:
 
-- **Order Book Implementation** (src/trading_engine/order_book.rs)
-- **Matching Engine Logic** (src/trading_engine/matching_engine.rs)
+
 - **Risk Management Module** (src/trading_engine/risk_manager.rs)
 
 #### Implementation Order:
 
-1. First implement the Order Book data structure
-2. Then add the Matching Engine that uses the Order Book
+
 3. Finally implement the Risk Manager that validates orders before they enter the matching engine
 
 ### 2. Implement the Security Component
