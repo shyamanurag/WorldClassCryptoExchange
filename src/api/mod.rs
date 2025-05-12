@@ -1,53 +1,34 @@
-// src/api/mod.rs
-use std::sync::Arc;
-use tokio::sync::oneshot;
+pub mod handlers;
+pub mod middleware;
+pub mod routes;
+pub mod websocket;
 
-use crate::config::ApiConfig;
-use crate::db::{OrderRepository, TradeRepository};
-use crate::security::AuthService;
-use crate::utils::metrics::Metrics;
+use actix_web::{web, App, HttpServer};
+use actix_cors::Cors;
+use middleware::{auth::AuthenticationMiddleware, logging::RequestLogger};
 
-mod rest;
-mod websocket;
-
-pub struct ApiGateway {
-    db_pool: sqlx::PgPool,
-    auth_service: Arc<AuthService>,
-    metrics: Arc<Metrics>,
-    config: ApiConfig,
-}
-
-impl ApiGateway {
-    pub fn new(
-        db_pool: sqlx::PgPool,
-        auth_service: AuthService,
-        metrics: Arc<Metrics>,
-        config: &ApiConfig,
-    ) -> Self {
-        Self {
-            db_pool,
-            auth_service: Arc::new(auth_service),
-            metrics,
-            config: config.clone(),
-        }
-    }
+pub async fn start_api_server(config: crate::config::Config) -> std::io::Result<()> {
+    let server_address = format!("{}:{}", config.api.host, config.api.port);
     
-    pub async fn start(&self, shutdown_signal: oneshot::Receiver<()>) -> Result<(), Box<dyn std::error::Error>> {
-        let order_repository = OrderRepository::new(self.db_pool.clone());
-        let trade_repository = TradeRepository::new(self.db_pool.clone());
+    println!("Starting API server on {}", server_address);
+    
+    HttpServer::new(move || {
+        // Configure CORS
+        let cors = Cors::default()
+            .allowed_origin(&config.api.cors_origin)
+            .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
+            .allowed_headers(vec!["Authorization", "Content-Type"])
+            .max_age(3600);
         
-        // Start REST API server
-        log::info!("Starting REST API server");
-        
-        // In a real implementation, this would start the actual servers
-        // For now, we just log that we started
-        log::info!("REST API server started successfully");
-        log::info!("WebSocket server started successfully");
-        
-        // Wait for shutdown signal
-        let _ = shutdown_signal.await;
-        log::info!("API gateway shutting down");
-        
-        Ok(())
-    }
+        App::new()
+            .wrap(cors)
+            .wrap(RequestLogger::new())
+            .app_data(web::Data::new(config.clone()))
+            // Register API routes
+            .configure(routes::register_routes)
+    })
+    .bind(server_address)?
+    .workers(config.api.workers)
+    .run()
+    .await
 }
