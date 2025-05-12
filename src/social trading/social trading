@@ -1,0 +1,2670 @@
+        let mut trades = self.trades.write().await;
+        let trade_id = trade.id;
+        trades.push(trade);
+        Ok(trade_id)
+    }
+    
+    pub async fn get_trade(&self, trade_id: &TradeId) -> Result<SocialTrade> {
+        let trades = self.trades.read().await;
+        trades
+            .iter()
+            .find(|t| t.id == *trade_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Trade not found: {}", trade_id))
+    }
+    
+    pub async fn update_trade(&self, trade: SocialTrade) -> Result<()> {
+        let mut trades = self.trades.write().await;
+        
+        let index = trades
+            .iter()
+            .position(|t| t.id == trade.id)
+            .ok_or_else(|| anyhow!("Trade not found: {}", trade.id))?;
+        
+        trades[index] = trade;
+        Ok(())
+    }
+    
+    pub async fn get_user_trades(&self, user_id: &UserId) -> Result<Vec<SocialTrade>> {
+        let trades = self.trades.read().await;
+        Ok(trades.iter().filter(|t| t.user_id == *user_id).cloned().collect())
+    }
+    
+    pub async fn get_public_trades(&self, limit: usize) -> Result<Vec<SocialTrade>> {
+        let trades = self.trades.read().await;
+        Ok(trades
+            .iter()
+            .filter(|t| t.is_public)
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+    
+    pub async fn get_trades_by_symbol(&self, symbol: &str) -> Result<Vec<SocialTrade>> {
+        let trades = self.trades.read().await;
+        Ok(trades
+            .iter()
+            .filter(|t| t.symbol == symbol && t.is_public)
+            .cloned()
+            .collect())
+    }
+}
+
+// Store for trading strategies
+pub struct StrategyStore {
+    strategies: RwLock<Vec<TradingStrategy>>,
+}
+
+impl StrategyStore {
+    pub fn new() -> Self {
+        StrategyStore {
+            strategies: RwLock::new(Vec::new()),
+        }
+    }
+    
+    pub async fn add_strategy(&self, strategy: TradingStrategy) -> Result<StrategyId> {
+        let mut strategies = self.strategies.write().await;
+        let strategy_id = strategy.id;
+        strategies.push(strategy);
+        Ok(strategy_id)
+    }
+    
+    pub async fn get_strategy(&self, strategy_id: &StrategyId) -> Result<TradingStrategy> {
+        let strategies = self.strategies.read().await;
+        strategies
+            .iter()
+            .find(|s| s.id == *strategy_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Strategy not found: {}", strategy_id))
+    }
+    
+    pub async fn update_strategy(&self, strategy: TradingStrategy) -> Result<()> {
+        let mut strategies = self.strategies.write().await;
+        
+        let index = strategies
+            .iter()
+            .position(|s| s.id == strategy.id)
+            .ok_or_else(|| anyhow!("Strategy not found: {}", strategy.id))?;
+        
+        strategies[index] = strategy;
+        Ok(())
+    }
+    
+    pub async fn get_user_strategies(&self, user_id: &UserId) -> Result<Vec<TradingStrategy>> {
+        let strategies = self.strategies.read().await;
+        Ok(strategies.iter().filter(|s| s.user_id == *user_id).cloned().collect())
+    }
+    
+    pub async fn get_public_strategies(&self, limit: usize) -> Result<Vec<TradingStrategy>> {
+        let strategies = self.strategies.read().await;
+        Ok(strategies
+            .iter()
+            .filter(|s| s.is_public)
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+    
+    pub async fn search_strategies(&self, query: &str) -> Result<Vec<TradingStrategy>> {
+        let strategies = self.strategies.read().await;
+        
+        let results: Vec<TradingStrategy> = strategies
+            .iter()
+            .filter(|s| {
+                s.is_public && (
+                    s.name.to_lowercase().contains(&query.to_lowercase())
+                    || s.description.to_lowercase().contains(&query.to_lowercase())
+                    || s.tags.iter().any(|t| t.to_lowercase().contains(&query.to_lowercase()))
+                )
+            })
+            .cloned()
+            .collect();
+        
+        Ok(results)
+    }
+}
+
+// Store for followers
+pub struct FollowerStore {
+    followers: RwLock<Vec<Follower>>,
+}
+
+impl FollowerStore {
+    pub fn new() -> Self {
+        FollowerStore {
+            followers: RwLock::new(Vec::new()),
+        }
+    }
+    
+    pub async fn add_follower(&self, follower: Follower) -> Result<FollowerId> {
+        let mut followers = self.followers.write().await;
+        
+        // Check if already following
+        if followers.iter().any(|f| f.follower_id == follower.follower_id && f.following_id == follower.following_id) {
+            return Err(anyhow!("User {} is already following {}", follower.follower_id, follower.following_id));
+        }
+        
+        let follower_id = follower.id;
+        followers.push(follower);
+        Ok(follower_id)
+    }
+    
+    pub async fn remove_follower(&self, follower_id: &UserId, following_id: &UserId) -> Result<()> {
+        let mut followers = self.followers.write().await;
+        
+        let index = followers
+            .iter()
+            .position(|f| f.follower_id == *follower_id && f.following_id == *following_id)
+            .ok_or_else(|| anyhow!("Follower relationship not found"))?;
+        
+        followers.remove(index);
+        Ok(())
+    }
+    
+    pub async fn get_followers(&self, user_id: &UserId) -> Result<Vec<Follower>> {
+        let followers = self.followers.read().await;
+        Ok(followers.iter().filter(|f| f.following_id == *user_id).cloned().collect())
+    }
+    
+    pub async fn get_following(&self, user_id: &UserId) -> Result<Vec<Follower>> {
+        let followers = self.followers.read().await;
+        Ok(followers.iter().filter(|f| f.follower_id == *user_id).cloned().collect())
+    }
+    
+    pub async fn update_copy_settings(&self, follower_id: &UserId, following_id: &UserId, settings: CopyTradingSettings) -> Result<()> {
+        let mut followers = self.followers.write().await;
+        
+        let follower = followers
+            .iter_mut()
+            .find(|f| f.follower_id == *follower_id && f.following_id == *following_id)
+            .ok_or_else(|| anyhow!("Follower relationship not found"))?;
+        
+        follower.copy_settings = settings;
+        follower.copy_trades = settings.enabled;
+        
+        Ok(())
+    }
+    
+    pub async fn get_copy_followers(&self, user_id: &UserId) -> Result<Vec<Follower>> {
+        let followers = self.followers.read().await;
+        Ok(followers.iter().filter(|f| f.following_id == *user_id && f.copy_trades).cloned().collect())
+    }
+}
+
+// Store for social posts
+pub struct SocialPostStore {
+    posts: RwLock<Vec<SocialPost>>,
+    comments: RwLock<Vec<Comment>>,
+    likes: RwLock<Vec<Like>>,
+}
+
+impl SocialPostStore {
+    pub fn new() -> Self {
+        SocialPostStore {
+            posts: RwLock::new(Vec::new()),
+            comments: RwLock::new(Vec::new()),
+            likes: RwLock::new(Vec::new()),
+        }
+    }
+    
+    // Posts
+    pub async fn add_post(&self, post: SocialPost) -> Result<PostId> {
+        let mut posts = self.posts.write().await;
+        let post_id = post.id;
+        posts.push(post);
+        Ok(post_id)
+    }
+    
+    pub async fn get_post(&self, post_id: &PostId) -> Result<SocialPost> {
+        let posts = self.posts.read().await;
+        posts
+            .iter()
+            .find(|p| p.id == *post_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Post not found: {}", post_id))
+    }
+    
+    pub async fn update_post(&self, post: SocialPost) -> Result<()> {
+        let mut posts = self.posts.write().await;
+        
+        let index = posts
+            .iter()
+            .position(|p| p.id == post.id)
+            .ok_or_else(|| anyhow!("Post not found: {}", post.id))?;
+        
+        posts[index] = post;
+        Ok(())
+    }
+    
+    pub async fn delete_post(&self, post_id: &PostId) -> Result<()> {
+        let mut posts = self.posts.write().await;
+        
+        let index = posts
+            .iter()
+            .position(|p| p.id == *post_id)
+            .ok_or_else(|| anyhow!("Post not found: {}", post_id))?;
+        
+        posts.remove(index);
+        
+        // Also delete related comments and likes
+        let mut comments = self.comments.write().await;
+        comments.retain(|c| c.post_id != Some(*post_id));
+        
+        let mut likes = self.likes.write().await;
+        likes.retain(|l| l.post_id != Some(*post_id));
+        
+        Ok(())
+    }
+    
+    pub async fn get_user_posts(&self, user_id: &UserId) -> Result<Vec<SocialPost>> {
+        let posts = self.posts.read().await;
+        Ok(posts.iter().filter(|p| p.user_id == *user_id).cloned().collect())
+    }
+    
+    pub async fn get_feed(&self, limit: usize) -> Result<Vec<SocialPost>> {
+        let posts = self.posts.read().await;
+        let mut sorted_posts = posts.clone();
+        
+        // Sort by recent first
+        sorted_posts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        
+        Ok(sorted_posts.into_iter().take(limit).collect())
+    }
+    
+    // Comments
+    pub async fn add_comment(&self, comment: Comment) -> Result<CommentId> {
+        let mut comments = self.comments.write().await;
+        let comment_id = comment.id;
+        
+        // Update comment count on the related item
+        if let Some(post_id) = comment.post_id {
+            self.increment_comment_count(post_id, None, None, None).await?;
+        } else if let Some(trade_id) = comment.trade_id {
+            self.increment_comment_count(None, trade_id, None, None).await?;
+        } else if let Some(strategy_id) = comment.strategy_id {
+            self.increment_comment_count(None, None, strategy_id, None).await?;
+        }
+        
+        comments.push(comment);
+        Ok(comment_id)
+    }
+    
+    pub async fn get_comment(&self, comment_id: &CommentId) -> Result<Comment> {
+        let comments = self.comments.read().await;
+        comments
+            .iter()
+            .find(|c| c.id == *comment_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Comment not found: {}", comment_id))
+    }
+    
+    pub async fn get_comments_for_post(&self, post_id: &PostId) -> Result<Vec<Comment>> {
+        let comments = self.comments.read().await;
+        Ok(comments.iter().filter(|c| c.post_id == Some(*post_id)).cloned().collect())
+    }
+    
+    pub async fn get_comments_for_trade(&self, trade_id: &TradeId) -> Result<Vec<Comment>> {
+        let comments = self.comments.read().await;
+        Ok(comments.iter().filter(|c| c.trade_id == Some(*trade_id)).cloned().collect())
+    }
+    
+    pub async fn get_comments_for_strategy(&self, strategy_id: &StrategyId) -> Result<Vec<Comment>> {
+        let comments = self.comments.read().await;
+        Ok(comments.iter().filter(|c| c.strategy_id == Some(*strategy_id)).cloned().collect())
+    }
+    
+    pub async fn delete_comment(&self, comment_id: &CommentId) -> Result<()> {
+        let mut comments = self.comments.write().await;
+        
+        let index = comments
+            .iter()
+            .position(|c| c.id == *comment_id)
+            .ok_or_else(|| anyhow!("Comment not found: {}", comment_id))?;
+        
+        let comment = &comments[index];
+        
+        // Decrement comment count on the related item
+        if let Some(post_id) = comment.post_id {
+            self.decrement_comment_count(post_id, None, None, None).await?;
+        } else if let Some(trade_id) = comment.trade_id {
+            self.decrement_comment_count(None, trade_id, None, None).await?;
+        } else if let Some(strategy_id) = comment.strategy_id {
+            self.decrement_comment_count(None, None, strategy_id, None).await?;
+        }
+        
+        comments.remove(index);
+        
+        // Also delete likes for this comment
+        let mut likes = self.likes.write().await;
+        likes.retain(|l| l.comment_id != Some(*comment_id));
+        
+        Ok(())
+    }
+    
+    // Likes
+    pub async fn add_like(&self, like: Like) -> Result<()> {
+        let mut likes = self.likes.write().await;
+        
+        // Check if already liked
+        if likes.iter().any(|l| 
+            l.user_id == like.user_id && 
+            l.post_id == like.post_id && 
+            l.trade_id == like.trade_id && 
+            l.comment_id == like.comment_id &&
+            l.strategy_id == like.strategy_id
+        ) {
+            return Err(anyhow!("Already liked"));
+        }
+        
+        // Increment like count on the related item
+        if let Some(post_id) = like.post_id {
+            self.increment_like_count(post_id, None, None, None).await?;
+        } else if let Some(trade_id) = like.trade_id {
+            self.increment_like_count(None, trade_id, None, None).await?;
+        } else if let Some(comment_id) = like.comment_id {
+            self.increment_like_count(None, None, None, comment_id).await?;
+        } else if let Some(strategy_id) = like.strategy_id {
+            self.increment_like_count(None, None, strategy_id, None).await?;
+        }
+        
+        likes.push(like);
+        Ok(())
+    }
+    
+    pub async fn remove_like(&self, user_id: &UserId, post_id: Option<PostId>, trade_id: Option<TradeId>, comment_id: Option<CommentId>, strategy_id: Option<StrategyId>) -> Result<()> {
+        let mut likes = self.likes.write().await;
+        
+        let index = likes
+            .iter()
+            .position(|l| 
+                l.user_id == *user_id && 
+                l.post_id == post_id && 
+                l.trade_id == trade_id && 
+                l.comment_id == comment_id &&
+                l.strategy_id == strategy_id
+            )
+            .ok_or_else(|| anyhow!("Like not found"))?;
+        
+        likes.remove(index);
+        
+        // Decrement like count on the related item
+        if let Some(pid) = post_id {
+            self.decrement_like_count(pid, None, None, None).await?;
+        } else if let Some(tid) = trade_id {
+            self.decrement_like_count(None, tid, None, None).await?;
+        } else if let Some(cid) = comment_id {
+            self.decrement_like_count(None, None, None, cid).await?;
+        } else if let Some(sid) = strategy_id {
+            self.decrement_like_count(None, None, sid, None).await?;
+        }
+        
+        Ok(())
+    }
+    
+    pub async fn get_likes(&self, post_id: Option<PostId>, trade_id: Option<TradeId>, comment_id: Option<CommentId>, strategy_id: Option<StrategyId>) -> Result<Vec<Like>> {
+        let likes = self.likes.read().await;
+        
+        Ok(likes
+            .iter()
+            .filter(|l| 
+                l.post_id == post_id && 
+                l.trade_id == trade_id && 
+                l.comment_id == comment_id &&
+                l.strategy_id == strategy_id
+            )
+            .cloned()
+            .collect())
+    }
+    
+    // Helpers for updating counts
+    async fn increment_comment_count(&self, post_id: Option<PostId>, trade_id: Option<TradeId>, strategy_id: Option<StrategyId>, _comment_id: Option<CommentId>) -> Result<()> {
+        if let Some(pid) = post_id {
+            let mut posts = self.posts.write().await;
+            if let Some(post) = posts.iter_mut().find(|p| p.id == pid) {
+                post.comments_count += 1;
+            }
+        } else if let Some(tid) = trade_id {
+            // This would update the trade's comment count in a real implementation
+            // For simplicity, we'll just print a message here
+            println!("Incrementing comment count for trade {}", tid);
+        } else if let Some(sid) = strategy_id {
+            // This would update the strategy's comment count in a real implementation
+            println!("Incrementing comment count for strategy {}", sid);
+        }
+        
+        Ok(())
+    }
+    
+    async fn decrement_comment_count(&self, post_id: Option<PostId>, trade_id: Option<TradeId>, strategy_id: Option<StrategyId>, _comment_id: Option<CommentId>) -> Result<()> {
+        if let Some(pid) = post_id {
+            let mut posts = self.posts.write().await;
+            if let Some(post) = posts.iter_mut().find(|p| p.id == pid) {
+                if post.comments_count > 0 {
+                    post.comments_count -= 1;
+                }
+            }
+        } else if let Some(tid) = trade_id {
+            // This would update the trade's comment count in a real implementation
+            println!("Decrementing comment count for trade {}", tid);
+        } else if let Some(sid) = strategy_id {
+            // This would update the strategy's comment count in a real implementation
+            println!("Decrementing comment count for strategy {}", sid);
+        }
+        
+        Ok(())
+    }
+    
+    async fn increment_like_count(&self, post_id: Option<PostId>, trade_id: Option<TradeId>, strategy_id: Option<StrategyId>, comment_id: Option<CommentId>) -> Result<()> {
+        if let Some(pid) = post_id {
+            let mut posts = self.posts.write().await;
+            if let Some(post) = posts.iter_mut().find(|p| p.id == pid) {
+                post.likes_count += 1;
+            }
+        } else if let Some(tid) = trade_id {
+            // This would update the trade's like count in a real implementation
+            println!("Incrementing like count for trade {}", tid);
+        } else if let Some(cid) = comment_id {
+            let mut comments = self.comments.write().await;
+            if let Some(comment) = comments.iter_mut().find(|c| c.id == cid) {
+                comment.likes_count += 1;
+            }
+        } else if let Some(sid) = strategy_id {
+            // This would update the strategy's like count in a real implementation
+            println!("Incrementing like count for strategy {}", sid);
+        }
+        
+        Ok(())
+    }
+    
+    async fn decrement_like_count(&self, post_id: Option<PostId>, trade_id: Option<TradeId>, strategy_id: Option<StrategyId>, comment_id: Option<CommentId>) -> Result<()> {
+        if let Some(pid) = post_id {
+            let mut posts = self.posts.write().await;
+            if let Some(post) = posts.iter_mut().find(|p| p.id == pid) {
+                if post.likes_count > 0 {
+                    post.likes_count -= 1;
+                }
+            }
+        } else if let Some(tid) = trade_id {
+            // This would update the trade's like count in a real implementation
+            println!("Decrementing like count for trade {}", tid);
+        } else if let Some(cid) = comment_id {
+            let mut comments = self.comments.write().await;
+            if let Some(comment) = comments.iter_mut().find(|c| c.id == cid) {
+                if comment.likes_count > 0 {
+                    comment.likes_count -= 1;
+                }
+            }
+        } else if let Some(sid) = strategy_id {
+            // This would update the strategy's like count in a real implementation
+            println!("Decrementing like count for strategy {}", sid);
+        }
+        
+        Ok(())
+    }
+}
+
+// Store for leaderboards
+pub struct LeaderboardStore {
+    leaderboards: RwLock<Vec<Leaderboard>>,
+}
+
+impl LeaderboardStore {
+    pub fn new() -> Self {
+        LeaderboardStore {
+            leaderboards: RwLock::new(Vec::new()),
+        }
+    }
+    
+    pub async fn add_leaderboard(&self, leaderboard: Leaderboard) -> Result<LeaderboardId> {
+        let mut leaderboards = self.leaderboards.write().await;
+        let leaderboard_id = leaderboard.id;
+        leaderboards.push(leaderboard);
+        Ok(leaderboard_id)
+    }
+    
+    pub async fn get_leaderboard(&self, leaderboard_id: &LeaderboardId) -> Result<Leaderboard> {
+        let leaderboards = self.leaderboards.read().await;
+        leaderboards
+            .iter()
+            .find(|l| l.id == *leaderboard_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Leaderboard not found: {}", leaderboard_id))
+    }
+    
+    pub async fn update_leaderboard(&self, leaderboard: Leaderboard) -> Result<()> {
+        let mut leaderboards = self.leaderboards.write().await;
+        
+        let index = leaderboards
+            .iter()
+            .position(|l| l.id == leaderboard.id)
+            .ok_or_else(|| anyhow!("Leaderboard not found: {}", leaderboard.id))?;
+        
+        leaderboards[index] = leaderboard;
+        Ok(())
+    }
+    
+    pub async fn get_active_leaderboards(&self) -> Result<Vec<Leaderboard>> {
+        let leaderboards = self.leaderboards.read().await;
+        Ok(leaderboards.iter().filter(|l| l.is_active).cloned().collect())
+    }
+    
+    pub async fn get_leaderboard_entries(&self, leaderboard_id: &LeaderboardId) -> Result<Vec<LeaderboardEntry>> {
+        let leaderboard = self.get_leaderboard(leaderboard_id).await?;
+        Ok(leaderboard.entries)
+    }
+    
+    pub async fn get_user_rankings(&self, user_id: &UserId) -> Result<Vec<(LeaderboardId, i32)>> {
+        let leaderboards = self.leaderboards.read().await;
+        
+        let mut rankings = Vec::new();
+        for leaderboard in leaderboards.iter() {
+            if let Some(entry) = leaderboard.entries.iter().find(|e| e.user_id == *user_id) {
+                rankings.push((leaderboard.id, entry.rank));
+            }
+        }
+        
+        Ok(rankings)
+    }
+}
+
+// Store for trading competitions
+pub struct CompetitionStore {
+    competitions: RwLock<Vec<TradingCompetition>>,
+}
+
+impl CompetitionStore {
+    pub fn new() -> Self {
+        CompetitionStore {
+            competitions: RwLock::new(Vec::new()),
+        }
+    }
+    
+    pub async fn add_competition(&self, competition: TradingCompetition) -> Result<CompetitionId> {
+        let mut competitions = self.competitions.write().await;
+        let competition_id = competition.id;
+        competitions.push(competition);
+        Ok(competition_id)
+    }
+    
+    pub async fn get_competition(&self, competition_id: &CompetitionId) -> Result<TradingCompetition> {
+        let competitions = self.competitions.read().await;
+        competitions
+            .iter()
+            .find(|c| c.id == *competition_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Competition not found: {}", competition_id))
+    }
+    
+    pub async fn update_competition(&self, competition: TradingCompetition) -> Result<()> {
+        let mut competitions = self.competitions.write().await;
+        
+        let index = competitions
+            .iter()
+            .position(|c| c.id == competition.id)
+            .ok_or_else(|| anyhow!("Competition not found: {}", competition.id))?;
+        
+        competitions[index] = competition;
+        Ok(())
+    }
+    
+    pub async fn get_active_competitions(&self) -> Result<Vec<TradingCompetition>> {
+        let competitions = self.competitions.read().await;
+        let now = Utc::now();
+        
+        Ok(competitions
+            .iter()
+            .filter(|c| {
+                (c.status == CompetitionStatus::RegistrationOpen || c.status == CompetitionStatus::InProgress)
+                && c.start_time <= now && c.end_time > now
+            })
+            .cloned()
+            .collect())
+    }
+    
+    pub async fn get_upcoming_competitions(&self) -> Result<Vec<TradingCompetition>> {
+        let competitions = self.competitions.read().await;
+        let now = Utc::now();
+        
+        Ok(competitions
+            .iter()
+            .filter(|c| c.status == CompetitionStatus::Upcoming && c.start_time > now)
+            .cloned()
+            .collect())
+    }
+    
+    pub async fn get_completed_competitions(&self) -> Result<Vec<TradingCompetition>> {
+        let competitions = self.competitions.read().await;
+        
+        Ok(competitions
+            .iter()
+            .filter(|c| c.status == CompetitionStatus::Completed)
+            .cloned()
+            .collect())
+    }
+    
+    pub async fn register_participant(&self, competition_id: &CompetitionId, user_id: &UserId) -> Result<()> {
+        let mut competitions = self.competitions.write().await;
+        
+        let competition = competitions
+            .iter_mut()
+            .find(|c| c.id == *competition_id)
+            .ok_or_else(|| anyhow!("Competition not found: {}", competition_id))?;
+        
+        // Check if registration is open
+        if competition.status != CompetitionStatus::RegistrationOpen {
+            return Err(anyhow!("Registration is not open for this competition"));
+        }
+        
+        // Check if user is already registered
+        if competition.participants.iter().any(|p| p.user_id == *user_id) {
+            return Err(anyhow!("User is already registered for this competition"));
+        }
+        
+        // Check if maximum participants reached
+        if let Some(max) = competition.maximum_participants {
+            if competition.participants.len() >= max as usize {
+                return Err(anyhow!("Competition has reached maximum participants"));
+            }
+        }
+        
+        // Register participant
+        let participant = CompetitionParticipant {
+            user_id: *user_id,
+            registration_time: Utc::now(),
+            current_rank: None,
+            current_pnl: None,
+            trade_count: 0,
+            disqualified: false,
+            disqualification_reason: None,
+        };
+        
+        competition.participants.push(participant);
+        competition.updated_at = Utc::now();
+        
+        Ok(())
+    }
+    
+    pub async fn update_participant_ranking(&self, competition_id: &CompetitionId, user_id: &UserId, rank: i32, pnl: Decimal) -> Result<()> {
+        let mut competitions = self.competitions.write().await;
+        
+        let competition = competitions
+            .iter_mut()
+            .find(|c| c.id == *competition_id)
+            .ok_or_else(|| anyhow!("Competition not found: {}", competition_id))?;
+        
+        let participant = competition
+            .participants
+            .iter_mut()
+            .find(|p| p.user_id == *user_id)
+            .ok_or_else(|| anyhow!("Participant not found in competition"))?;
+        
+        participant.current_rank = Some(rank);
+        participant.current_pnl = Some(pnl);
+        competition.updated_at = Utc::now();
+        
+        Ok(())
+    }
+}
+
+// Store for badges and achievements
+pub struct BadgeStore {
+    badges: RwLock<Vec<Badge>>,
+    achievements: RwLock<Vec<Achievement>>,
+    user_achievements: RwLock<Vec<UserAchievement>>,
+    user_badges: RwLock<Vec<(UserId, BadgeId)>>,
+}
+
+impl BadgeStore {
+    pub fn new() -> Self {
+        BadgeStore {
+            badges: RwLock::new(Vec::new()),
+            achievements: RwLock::new(Vec::new()),
+            user_achievements: RwLock::new(Vec::new()),
+            user_badges: RwLock::new(Vec::new()),
+        }
+    }
+    
+    // Badge operations
+    pub async fn add_badge(&self, badge: Badge) -> Result<BadgeId> {
+        let mut badges = self.badges.write().await;
+        let badge_id = badge.id;
+        badges.push(badge);
+        Ok(badge_id)
+    }
+    
+    pub async fn get_badge(&self, badge_id: &BadgeId) -> Result<Badge> {
+        let badges = self.badges.read().await;
+        badges
+            .iter()
+            .find(|b| b.id == *badge_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Badge not found: {}", badge_id))
+    }
+    
+    pub async fn award_badge(&self, user_id: &UserId, badge_id: &BadgeId) -> Result<()> {
+        // Check if badge exists
+        self.get_badge(badge_id).await?;
+        
+        let mut user_badges = self.user_badges.write().await;
+        
+        // Check if user already has the badge
+        if user_badges.iter().any(|(uid, bid)| uid == user_id && bid == badge_id) {
+            return Err(anyhow!("User already has this badge"));
+        }
+        
+        user_badges.push((*user_id, *badge_id));
+        Ok(())
+    }
+    
+    pub async fn get_user_badges(&self, user_id: &UserId) -> Result<Vec<Badge>> {
+        let user_badges = self.user_badges.read().await;
+        let badges = self.badges.read().await;
+        
+        let badge_ids: Vec<BadgeId> = user_badges
+            .iter()
+            .filter_map(|(uid, bid)| if uid == user_id { Some(*bid) } else { None })
+            .collect();
+        
+        let user_badges: Vec<Badge> = badges
+            .iter()
+            .filter(|b| badge_ids.contains(&b.id))
+            .cloned()
+            .collect();
+        
+        Ok(user_badges)
+    }
+    
+    // Achievement operations
+    pub async fn add_achievement(&self, achievement: Achievement) -> Result<AchievementId> {
+        let mut achievements = self.achievements.write().await;
+        let achievement_id = achievement.id;
+        achievements.push(achievement);
+        Ok(achievement_id)
+    }
+    
+    pub async fn get_achievement(&self, achievement_id: &AchievementId) -> Result<Achievement> {
+        let achievements = self.achievements.read().await;
+        achievements
+            .iter()
+            .find(|a| a.id == *achievement_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Achievement not found: {}", achievement_id))
+    }
+    
+    pub async fn unlock_achievement(&self, user_id: &UserId, achievement_id: &AchievementId) -> Result<()> {
+        // Check if achievement exists
+        self.get_achievement(achievement_id).await?;
+        
+        let mut user_achievements = self.user_achievements.write().await;
+        
+        // Check if user already has the achievement
+        if user_achievements.iter().any(|ua| ua.user_id == *user_id && ua.achievement_id == *achievement_id) {
+            return Err(anyhow!("User already has this achievement"));
+        }
+        
+        let user_achievement = UserAchievement {
+            user_id: *user_id,
+            achievement_id: *achievement_id,
+            unlocked_at: Utc::now(),
+            progress: 1,
+            max_progress: 1,
+        };
+        
+        user_achievements.push(user_achievement);
+        Ok(())
+    }
+    
+    pub async fn update_achievement_progress(&self, user_id: &UserId, achievement_id: &AchievementId, progress: i32) -> Result<bool> {
+        let mut user_achievements = self.user_achievements.write().await;
+        
+        // Find or create the user achievement
+        let user_achievement = user_achievements
+            .iter_mut()
+            .find(|ua| ua.user_id == *user_id && ua.achievement_id == *achievement_id);
+        
+        if let Some(ua) = user_achievement {
+            ua.progress = progress;
+            
+            // Check if achievement is complete
+            let complete = ua.progress >= ua.max_progress;
+            if complete {
+                ua.unlocked_at = Utc::now();
+            }
+            
+            Ok(complete)
+        } else {
+            // Get max progress from achievement definition
+            let achievements = self.achievements.read().await;
+            let achievement = achievements
+                .iter()
+                .find(|a| a.id == *achievement_id)
+                .ok_or_else(|| anyhow!("Achievement not found: {}", achievement_id))?;
+            
+            let user_achievement = UserAchievement {
+                user_id: *user_id,
+                achievement_id: *achievement_id,
+                unlocked_at: if progress >= 1 { Utc::now() } else { Utc::now() },
+                progress,
+                max_progress: 1, // Default, should be set from achievement definition
+            };
+            
+            let complete = user_achievement.progress >= user_achievement.max_progress;
+            user_achievements.push(user_achievement);
+            
+            Ok(complete)
+        }
+    }
+    
+    pub async fn get_user_achievements(&self, user_id: &UserId) -> Result<Vec<(Achievement, UserAchievement)>> {
+        let user_achievements = self.user_achievements.read().await;
+        let achievements = self.achievements.read().await;
+        
+        let mut result = Vec::new();
+        
+        for ua in user_achievements.iter().filter(|ua| ua.user_id == *user_id) {
+            if let Some(achievement) = achievements.iter().find(|a| a.id == ua.achievement_id) {
+                result.push((achievement.clone(), ua.clone()));
+            }
+        }
+        
+        Ok(result)
+    }
+}
+
+// Copy trading implementation
+pub struct CopyTradingService {
+    follower_store: Arc<FollowerStore>,
+    trade_store: Arc<SocialTradeStore>,
+    order_executor: Arc<dyn OrderExecutor>,
+}
+
+#[async_trait]
+pub trait OrderExecutor: Send + Sync {
+    async fn execute_order(&self, user_id: &UserId, order: Order) -> Result<OrderStatus>;
+}
+
+impl CopyTradingService {
+    pub fn new(
+        follower_store: Arc<FollowerStore>,
+        trade_store: Arc<SocialTradeStore>,
+        order_executor: Arc<dyn OrderExecutor>,
+    ) -> Self {
+        CopyTradingService {
+            follower_store,
+            trade_store,
+            order_executor,
+        }
+    }
+    
+    pub async fn process_new_trade(&self, trade: &SocialTrade) -> Result<Vec<TradeId>> {
+        // Find followers who have enabled copy trading for this trader
+        let followers = self.follower_store.get_copy_followers(&trade.user_id).await?;
+        
+        if followers.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        let mut copied_trade_ids = Vec::new();
+        
+        // Process each follower
+        for follower in followers {
+            if let Ok(trade_id) = self.copy_trade_for_follower(trade, &follower).await {
+                copied_trade_ids.push(trade_id);
+            }
+        }
+        
+        Ok(copied_trade_ids)
+    }
+    
+    pub async fn process_trade_close(&self, trade: &SocialTrade) -> Result<()> {
+        // Find all copied trades
+        // In a real implementation, we would have a way to track which trades were copied from an original
+        // For this example, we'll just print a message
+        println!("Processing close of trade {}", trade.id);
+        
+        Ok(())
+    }
+    
+    async fn copy_trade_for_follower(&self, original_trade: &SocialTrade, follower: &Follower) -> Result<TradeId> {
+        // Apply copy trading settings
+        let settings = &follower.copy_settings;
+        
+        // Check if asset is excluded
+        if settings.exclude_assets.contains(&original_trade.symbol) {
+            return Err(anyhow!("Asset is excluded in copy settings"));
+        }
+        
+        // Calculate size based on allocation and risk multiplier
+        let allocation = settings.allocation_percentage / Decimal::new(100, 0) * settings.risk_multiplier;
+        let size = original_trade.size * allocation;
+        
+        // Check if size exceeds max position size
+        let size = if size > settings.max_position_size {
+            settings.max_position_size
+        } else {
+            size
+        };
+        
+        // Apply leverage limit if set
+        let leverage = if let Some(limit) = settings.leverage_limit {
+            if let Some(orig_leverage) = original_trade.leverage {
+                if orig_leverage > limit {
+                    limit
+                } else {
+                    orig_leverage
+                }
+            } else {
+                Decimal::new(1, 0) // Default to 1x if no leverage specified
+            }
+        } else {
+            original_trade.leverage.unwrap_or(Decimal::new(1, 0))
+        };
+        
+        // Create an order
+        let order = Order::new(
+            follower.follower_id,
+            original_trade.symbol.clone(),
+            original_trade.side,
+            OrderType::Market, // Use market order for immediate execution
+            Some(original_trade.entry_price), // Use same entry price
+            size,
+            None, // Time in force doesn't apply for this example
+            None, // No stop price
+        );
+        
+        // Execute the order through the order executor
+        let status = self.order_executor.execute_order(&follower.follower_id, order).await?;
+        
+        if status != OrderStatus::Filled && status != OrderStatus::PartiallyFilled {
+            return Err(anyhow!("Order execution failed: {:?}", status));
+        }
+        
+        // Create a copied social trade record
+        let copied_trade = SocialTrade {
+            id: Uuid::new_v4(),
+            user_id: follower.follower_id,
+            symbol: original_trade.symbol.clone(),
+            side: original_trade.side,
+            size,
+            entry_price: original_trade.entry_price,
+            exit_price: None,
+            pnl: None,
+            pnl_percentage: None,
+            open_time: Utc::now(),
+            close_time: None,
+            is_open: true,
+            strategy_id: original_trade.strategy_id,
+            likes_count: 0,
+            comments_count: 0,
+            is_public: false, // Copied trades are private by default
+            tags: vec!["copied".to_string()],
+            description: Some(format!("Copied from {}", original_trade.user_id)),
+            screenshot_url: None,
+            leverage: Some(leverage),
+            stop_loss: if settings.copy_stop_loss { original_trade.stop_loss } else { None },
+            take_profit: if settings.copy_take_profit { original_trade.take_profit } else { None },
+            copied_count: 0,
+            risk_reward_ratio: original_trade.risk_reward_ratio,
+        };
+        
+        // Save the copied trade
+        let trade_id = self.trade_store.add_trade(copied_trade).await?;
+        
+        Ok(trade_id)
+    }
+}
+
+#[async_trait]
+impl CopyTradingExecutor for CopyTradingService {
+    async fn copy_trade(&self, original_trade: &SocialTrade, follower_id: &UserId) -> Result<TradeId> {
+        // For demonstration purposes, we'll create a simple follower object
+        let follower = Follower {
+            id: Uuid::new_v4(),
+            follower_id: *follower_id,
+            following_id: original_trade.user_id,
+            created_at: Utc::now(),
+            allocation: Some(Decimal::new(10, 0)), // 10%
+            copy_trades: true,
+            copy_settings: CopyTradingSettings::default(),
+        };
+        
+        self.copy_trade_for_follower(original_trade, &follower).await
+    }
+    
+    async fn close_copied_trade(&self, original_trade: &SocialTrade, follower_id: &UserId) -> Result<()> {
+        // In a real implementation, we would find and close the corresponding copied trade
+        println!("Closing copied trade for follower {}", follower_id);
+        Ok(())
+    }
+    
+    async fn update_copy_settings(&self, follower_id: &UserId, settings: CopyTradingSettings) -> Result<()> {
+        // In a real implementation, we would find and update all follower relationships for this user
+        println!("Updating copy settings for follower {}", follower_id);
+        Ok(())
+    }
+    
+    async fn get_copy_statistics(&self, user_id: &UserId) -> Result<CopyTradingStatistics> {
+        // In a real implementation, we would calculate actual statistics
+        Ok(CopyTradingStatistics {
+            user_id: *user_id,
+            total_copied_trades: 0,
+            active_copied_trades: 0,
+            total_traders_copied: 0,
+            total_followers: 0,
+            total_pnl: Decimal::ZERO,
+            avg_pnl_per_trade: Decimal::ZERO,
+            best_performing_trader: None,
+            worst_performing_trader: None,
+            copy_trading_since: Utc::now(),
+        })
+    }
+}
+
+// Mock implementation of OrderExecutor for testing
+pub struct MockOrderExecutor;
+
+#[async_trait]
+impl OrderExecutor for MockOrderExecutor {
+    async fn execute_order(&self, user_id: &UserId, order: Order) -> Result<OrderStatus> {
+        // Simulate order execution with a 90% success rate
+        let random = rand::random::<f64>();
+        
+        if random < 0.9 {
+            Ok(OrderStatus::Filled)
+        } else {
+            Ok(OrderStatus::Rejected)
+        }
+    }
+}
+
+// Social trading manager
+pub struct SocialTradingManager {
+    trader_profile_store: Arc<TraderProfileStore>,
+    social_trade_store: Arc<SocialTradeStore>,
+    strategy_store: Arc<StrategyStore>,
+    follower_store: Arc<FollowerStore>,
+    social_post_store: Arc<SocialPostStore>,
+    leaderboard_store: Arc<LeaderboardStore>,
+    competition_store: Arc<CompetitionStore>,
+    badge_store: Arc<BadgeStore>,
+    copy_trading_service: Arc<CopyTradingService>,
+}
+
+impl SocialTradingManager {
+    pub fn new(
+        trader_profile_store: Arc<TraderProfileStore>,
+        social_trade_store: Arc<SocialTradeStore>,
+        strategy_store: Arc<StrategyStore>,
+        follower_store: Arc<FollowerStore>,
+        social_post_store: Arc<SocialPostStore>,
+        leaderboard_store: Arc<LeaderboardStore>,
+        competition_store: Arc<CompetitionStore>,
+        badge_store: Arc<BadgeStore>,
+        copy_trading_service: Arc<CopyTradingService>,
+    ) -> Self {
+        SocialTradingManager {
+            trader_profile_store,
+            social_trade_store,
+            strategy_store,
+            follower_store,
+            social_post_store,
+            leaderboard_store,
+            competition_store,
+            badge_store,
+            copy_trading_service,
+        }
+    }
+    
+    // Profile management
+    pub async fn create_trader_profile(&self, 
+        user_id: UserId,
+        display_name: String,
+        bio: Option<String>,
+        profile_picture_url: Option<String>,
+        is_public: bool,
+    ) -> Result<TraderProfile> {
+        let now = Utc::now();
+        
+        let profile = TraderProfile {
+            user_id,
+            display_name,
+            bio,
+            profile_picture_url,
+            is_public,
+            is_verified: false,
+            followers_count: 0,
+            following_count: 0,
+            total_trades: 0,
+            win_rate: Decimal::ZERO,
+            avg_profit: Decimal::ZERO,
+            avg_loss: Decimal::ZERO,
+            profit_factor: Decimal::new(1, 0),
+            sharpe_ratio: Decimal::ZERO,
+            max_drawdown: Decimal::ZERO,
+            created_at: now,
+            updated_at: now,
+            badges: Vec::new(),
+            achievements: Vec::new(),
+            allow_copy_trading: false,
+            performance_fee: None,
+            lifetime_pnl: Decimal::ZERO,
+            favorite_assets: Vec::new(),
+            trading_style: None,
+            risk_level: TradingRiskLevel::Moderate,
+            average_holding_time: None,
+            biography: None,
+            website: None,
+            social_links: Vec::new(),
+        };
+        
+        self.trader_profile_store.add_profile(profile.clone()).await?;
+        
+        Ok(profile)
+    }
+    
+    // Follow management
+    pub async fn follow_trader(&self, follower_id: UserId, following_id: UserId) -> Result<Follower> {
+        // Check if profiles exist
+        self.trader_profile_store.get_profile(&follower_id).await?;
+        self.trader_profile_store.get_profile(&following_id).await?;
+        
+        let follower = Follower {
+            id: Uuid::new_v4(),
+            follower_id,
+            following_id,
+            created_at: Utc::now(),
+            allocation: None,
+            copy_trades: false,
+            copy_settings: CopyTradingSettings::default(),
+        };
+        
+        self.follower_store.add_follower(follower.clone()).await?;
+        
+        // Update follower counts
+        let mut following_profile = self.trader_profile_store.get_profile(&following_id).await?;
+        following_profile.followers_count += 1;
+        self.trader_profile_store.update_profile(following_profile).await?;
+        
+        let mut follower_profile = self.trader_profile_store.get_profile(&follower_id).await?;
+        follower_profile.following_count += 1;
+        self.trader_profile_store.update_profile(follower_profile).await?;
+        
+        Ok(follower)
+    }
+    
+    pub async fn unfollow_trader(&self, follower_id: &UserId, following_id: &UserId) -> Result<()> {
+        self.follower_store.remove_follower(follower_id, following_id).await?;
+        
+        // Update follower counts
+        let mut following_profile = self.trader_profile_store.get_profile(following_id).await?;
+        if following_profile.followers_count > 0 {
+            following_profile.followers_count -= 1;
+        }
+        self.trader_profile_store.update_profile(following_profile).await?;
+        
+        let mut follower_profile = self.trader_profile_store.get_profile(follower_id).await?;
+        if follower_profile.following_count > 0 {
+            follower_profile.following_count -= 1;
+        }
+        self.trader_profile_store.update_profile(follower_profile).await?;
+        
+        Ok(())
+    }
+    
+    // Copy trading
+    pub async fn enable_copy_trading(&self, follower_id: &UserId, following_id: &UserId, settings: CopyTradingSettings) -> Result<()> {
+        self.follower_store.update_copy_settings(follower_id, following_id, settings).await
+    }
+    
+    pub async fn process_new_trade(&self, trade: &SocialTrade) -> Result<Vec<TradeId>> {
+        self.copy_trading_service.process_new_trade(trade).await
+    }
+    
+    // Social interactions
+    pub async fn create_post(&self, 
+        user_id: UserId,
+        content: String,
+        attachment_url: Option<String>,
+        attachment_type: Option<String>,
+        tags: Vec<String>,
+        mentioned_users: Vec<UserId>,
+        linked_trade_id: Option<TradeId>,
+        linked_strategy_id: Option<StrategyId>,
+    ) -> Result<SocialPost> {
+        let post = SocialPost {
+            id: Uuid::new_v4(),
+            user_id,
+            content,
+            attachment_url,
+            attachment_type,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            likes_count: 0,
+            comments_count: 0,
+            shares_count: 0,
+            is_pinned: false,
+            tags,
+            mentioned_users,
+            linked_trade_id,
+            linked_strategy_id,
+        };
+        
+        self.social_post_store.add_post(post.clone()).await?;
+        
+        Ok(post)
+    }
+    
+    pub async fn add_comment(&self,
+        user_id: UserId,
+        post_id: Option<PostId>,
+        trade_id: Option<TradeId>,
+        strategy_id: Option<StrategyId>,
+        parent_comment_id: Option<CommentId>,
+        content: String,
+    ) -> Result<Comment> {
+        let comment = Comment {
+            id: Uuid::new_v4(),
+            user_id,
+            post_id,
+            trade_id,
+            strategy_id,
+            parent_comment_id,
+            content,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            likes_count: 0,
+        };
+        
+        self.social_post_store.add_comment(comment.clone()).await?;
+        
+        Ok(comment)
+    }
+    
+    pub async fn like_item(&self,
+        user_id: UserId,
+        post_id: Option<PostId>,
+        trade_id: Option<TradeId>,
+        comment_id: Option<CommentId>,
+        strategy_id: Option<StrategyId>,
+    ) -> Result<()> {
+        let like = Like {
+            user_id,
+            post_id,
+            trade_id,
+            comment_id,
+            strategy_id,
+            created_at: Utc::now(),
+        };
+        
+        self.social_post_store.add_like(like).await
+    }
+    
+    // Leaderboards
+    pub async fn create_leaderboard(&self,
+        name: String,
+        description: String,
+        period: LeaderboardPeriod,
+        category: LeaderboardCategory,
+    ) -> Result<Leaderboard> {
+        let leaderboard = Leaderboard {
+            id: Uuid::new_v4(),
+            name,
+            description,
+            period,
+            category,
+            entries: Vec::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            is_active: true,
+        };
+        
+        self.leaderboard_store.add_leaderboard(leaderboard.clone()).await?;
+        
+        Ok(leaderboard)
+    }
+    
+    pub async fn update_leaderboard_rankings(&self, leaderboard_id: &LeaderboardId, entries: Vec<LeaderboardEntry>) -> Result<()> {
+        let mut leaderboard = self.leaderboard_store.get_leaderboard(leaderboard_id).await?;
+        leaderboard.entries = entries;
+        leaderboard.updated_at = Utc::now();
+        
+        self.leaderboard_store.update_leaderboard(leaderboard).await
+    }
+    
+    // Competitions
+    pub async fn create_competition(&self,
+        name: String,
+        description: String,
+        rules: String,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        registration_deadline: DateTime<Utc>,
+        prize_pool: Decimal,
+        prizes: Vec<CompetitionPrize>,
+        allowed_assets: Option<Vec<String>>,
+        min_trades: Option<i32>,
+        entry_fee: Option<Decimal>,
+        maximum_participants: Option<i32>,
+    ) -> Result<TradingCompetition> {
+        let competition = TradingCompetition {
+            id: Uuid::new_v4(),
+            name,
+            description,
+            rules,
+            start_time,
+            end_time,
+            registration_deadline,
+            prize_pool,
+            prizes,
+            participants: Vec::new(),
+            status: CompetitionStatus::Upcoming,
+            allowed_assets,
+            min_trades,
+            entry_fee,
+            maximum_participants,
+            updated_at: Utc::now(),
+        };
+        
+        self.competition_store.add_competition(competition.clone()).await?;
+        
+        Ok(competition)
+    }
+    
+    pub async fn register_for_competition(&self, competition_id: &CompetitionId, user_id: &UserId) -> Result<()> {
+        self.competition_store.register_participant(competition_id, user_id).await
+    }
+    
+    // Badges and achievements
+    pub async fn create_badge(&self,
+        name: String,
+        description: String,
+        icon_url: String,
+        category: BadgeCategory,
+        rarity: BadgeRarity,
+    ) -> Result<Badge> {
+        let badge = Badge {
+            id: Uuid::new_v4(),
+            name,
+            description,
+            icon_url,
+            category,
+            rarity,
+            created_at: Utc::now(),
+        };
+        
+        self.badge_store.add_badge(badge.clone()).await?;
+        
+        Ok(badge)
+    }
+    
+    pub async fn award_badge(&self, user_id: &UserId, badge_id: &BadgeId) -> Result<()> {
+        self.badge_store.award_badge(user_id, badge_id).await?;
+        
+        // Update the user's profile to include the badge
+        let mut profile = self.trader_profile_store.get_profile(user_id).await?;
+        if !profile.badges.contains(badge_id) {
+            profile.badges.push(*badge_id);
+            self.trader_profile_store.update_profile(profile).await?;
+        }
+        
+        Ok(())
+    }
+    
+    pub async fn create_achievement(&self,
+        name: String,
+        description: String,
+        icon_url: String,
+        requirement: String,
+        points: i32,
+        category: AchievementCategory,
+    ) -> Result<Achievement> {
+        let achievement = Achievement {
+            id: Uuid::new_v4(),
+            name,
+            description,
+            icon_url,
+            requirement,
+            points,
+            category,
+            created_at: Utc::now(),
+        };
+        
+        self.badge_store.add_achievement(achievement.clone()).await?;
+        
+        Ok(achievement)
+    }
+    
+    pub async fn unlock_achievement(&self, user_id: &UserId, achievement_id: &AchievementId) -> Result<()> {
+        self.badge_store.unlock_achievement(user_id, achievement_id).await?;
+        
+        // Update the user's profile to include the achievement
+        let mut profile = self.trader_profile_store.get_profile(user_id).await?;
+        if !profile.achievements.contains(achievement_id) {
+            profile.achievements.push(*achievement_id);
+            self.trader_profile_store.update_profile(profile).await?;
+        }
+        
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+    
+    #[tokio::test]
+    async fn test_social_trading_basic_flow() {
+        // Create stores
+        let trader_profile_store = Arc::new(TraderProfileStore::new());
+        let social_trade_store = Arc::new(SocialTradeStore::new());
+        let strategy_store = Arc::new(StrategyStore::new());
+        let follower_store = Arc::new(FollowerStore::new());
+        let social_post_store = Arc::new(SocialPostStore::new());
+        let leaderboard_store = Arc::new(LeaderboardStore::new());
+        let competition_store = Arc::new(CompetitionStore::new());
+        let badge_store = Arc::new(BadgeStore::new());
+        
+        // Create copy trading service
+        let order_executor = Arc::new(MockOrderExecutor);
+        let copy_trading_service = Arc::new(CopyTradingService::new(
+            follower_store.clone(),
+            social_trade_store.clone(),
+            order_executor,
+        ));
+        
+        // Create social trading manager
+        let social_trading_manager = SocialTradingManager::new(
+            trader_profile_store.clone(),
+            social_trade_store.clone(),
+            strategy_store.clone(),
+            follower_store.clone(),
+            social_post_store.clone(),
+            leaderboard_store.clone(),
+            competition_store.clone(),
+            badge_store.clone(),
+            copy_trading_service.clone(),
+        );
+        
+        // Create trader profiles
+        let trader1_id = Uuid::new_v4();
+        let trader1 = social_trading_manager
+            .create_trader_profile(
+                trader1_id,
+                "Trader1".to_string(),
+                Some("Professional trader".to_string()),
+                Some("https://example.com/profile1.jpg".to_string()),
+                true,
+            )
+            .await
+            .unwrap();
+        
+        let trader2_id = Uuid::new_v4();
+        let trader2 = social_trading_manager
+            .create_trader_profile(
+                trader2_id,
+                "Trader2".to_string(),
+                Some("Crypto enthusiast".to_string()),
+                Some("https://example.com/profile2.jpg".to_string()),
+                true,
+            )
+            .await
+            .unwrap();
+        
+        // Trader2 follows Trader1
+        let follower = social_trading_manager
+            .follow_trader(trader2_id, trader1_id)
+            .await
+            .unwrap();
+        
+        // Check follower counts
+        let updated_trader1 = trader_profile_store.get_profile(&trader1_id).await.unwrap();
+        let updated_trader2 = trader_profile_store.get_profile(&trader2_id).await.unwrap();
+        
+        assert_eq!(updated_trader1.followers_count, 1);
+        assert_eq!(updated_trader2.following_count, 1);
+        
+        // Trader1 posts a trade
+        let trade = SocialTrade {
+            id: Uuid::new_v4(),
+            user_id: trader1_id,
+            symbol: "BTC-USDT".to_string(),
+            side: Side::Buy,
+            size: dec!(0.1),
+            entry_price: dec!(50000),
+            exit_price: None,
+            pnl: None,
+            pnl_percentage: None,
+            open_time: Utc::now(),
+            close_time: None,
+            is_open: true,
+            strategy_id: None,
+            likes_count: 0,
+            comments_count: 0,
+            is_public: true,
+            tags: vec!["bitcoin".to_string(), "long".to_string()],
+            description: Some("Going long on BTC".to_string()),
+            screenshot_url: None,
+            leverage: Some(dec!(2)),
+            stop_loss: Some(dec!(48000)),
+            take_profit: Some(dec!(55000)),
+            copied_count: 0,
+            risk_reward_ratio: Some(dec!(1.4)),
+        };
+        
+        let trade_id = social_trade_store.add_trade(trade.clone()).await.unwrap();
+        
+        // Enable copy trading for Trader2
+        let mut copy_settings = CopyTradingSettings::default();
+        copy_settings.enabled = true;
+        copy_settings.allocation_percentage = dec!(20); // 20% allocation
+        copy_settings.risk_multiplier = dec!(0.8); // 80% of risk
+        
+        social_trading_manager
+            .enable_copy_trading(&trader2_id, &trader1_id, copy_settings)
+            .await
+            .unwrap();
+        
+        // Trader1 closes the trade with profit
+        let mut closed_trade = trade.clone();
+        closed_trade.is_open = false;
+        closed_trade.exit_price = Some(dec!(53000));
+        closed_trade.close_time = Some(Utc::now());
+        closed_trade.pnl = Some(dec!(300)); // $300 profit
+        closed_trade.pnl_percentage = Some(dec!(6)); // 6% profit
+        
+        social_trade_store.update_trade(closed_trade.clone()).await.unwrap();
+        
+        // Trader2 adds a comment on the trade
+        let comment = social_trading_manager
+            .add_comment(
+                trader2_id,
+                None,
+                Some(trade_id),
+                None,
+                None,
+                "Great trade! I copied it.".to_string(),
+            )
+            .await
+            .unwrap();
+        
+        // Trader1 likes the comment
+        social_trading_manager
+            .like_item(trader1_id, None, None, Some(comment.id), None)
+            .await
+            .unwrap();
+        
+        // Create a leaderboard
+        let leaderboard = social_trading_manager
+            .create_leaderboard(
+                "Weekly Profit Leaders".to_string(),
+                "Top traders by profit percentage this week".to_string(),
+                LeaderboardPeriod::Weekly,
+                LeaderboardCategory::ProfitPercentage,
+            )
+            .await
+            .unwrap();
+        
+        // Update leaderboard rankings
+        let entries = vec![
+            LeaderboardEntry {
+                user_id: trader1_id,
+                rank: 1,
+                previous_rank: None,
+                score: dec!(15.7), // 15.7% profit
+                change: dec!(3.2), // +3.2% from previous period
+            },
+            LeaderboardEntry {
+                user_id: trader2_id,
+                rank: 2,
+                previous_rank: None,
+                score: dec!(12.1), // 12.1% profit
+                change: dec!(5.6), // +5.6% from previous period
+            },
+        ];
+        
+        social_trading_manager
+            .update_leaderboard_rankings(&leaderboard.id, entries)
+            .await
+            .unwrap();
+        
+        // Create a badge
+        let badge = social_trading_manager
+            .create_badge(
+                "Top Trader".to_string(),
+                "Ranked #1 on a weekly leaderboard".to_string(),
+                "https://example.com/badges/top_trader.png".to_string(),
+                BadgeCategory::Trading,
+                BadgeRarity::Rare,
+            )
+            .await
+            .unwrap();
+        
+        // Award badge to Trader1
+        social_trading_manager
+            .award_badge(&trader1_id, &badge.id)
+            .await
+            .unwrap();
+        
+        // Check if Trader1 has the badge
+        let user_badges = badge_store.get_user_badges(&trader1_id).await.unwrap();
+        assert_eq!(user_badges.len(), 1);
+        assert_eq!(user_badges[0].id, badge.id);
+        
+        // Create a trading competition
+        let now = Utc::now();
+        let competition = social_trading_manager
+            .create_competition(
+                "Winter Trading Championship".to_string(),
+                "Compete for the highest returns over 2 weeks".to_string(),
+                "Trade any BTC or ETH pairs with a minimum of 10 trades".to_string(),
+                now + chrono::Duration::days(7), // Start in 1 week
+                now + chrono::Duration::days(21), // End in 3 weeks
+                now + chrono::Duration::days(6), // Registration deadline
+                dec!(10000), // $10,000 prize pool
+                vec![
+                    CompetitionPrize {
+                        rank: 1,
+                        prize_amount: dec!(5000),
+                        prize_type: PrizeType::Cash,
+                        description: "First place".to_string(),
+                    },
+                    CompetitionPrize {
+                        rank: 2,
+                        prize_amount: dec!(3000),
+                        prize_type: PrizeType::Cash,
+                        description: "Second place".to_string(),
+                    },
+                    CompetitionPrize {
+                        rank: 3,
+                        prize_amount: dec!(2000),
+                        prize_type: PrizeType::Cash,
+                        description: "Third place".to_string(),
+                    },
+                ],
+                Some(vec!["BTC-USDT".to_string(), "ETH-USDT".to_string()]),
+                Some(10), // Minimum 10 trades
+                None, // No entry fee
+                Some(100), // Maximum 100 participants
+            )
+            .await
+            .unwrap();
+        
+        // Both traders register for the competition
+        social_trading_manager
+            .register_for_competition(&competition.id, &trader1_id)
+            .await
+            .unwrap();
+        
+        social_trading_manager
+            .register_for_competition(&competition.id, &trader2_id)
+            .await
+            .unwrap();
+        
+        // Check the competition participants
+        let updated_competition = competition_store.get_competition(&competition.id).await.unwrap();
+        assert_eq!(updated_competition.participants.len(), 2);
+        
+        // Trader1 creates a social post
+        let post = social_trading_manager
+            .create_post(
+                trader1_id,
+                "Just registered for the Winter Trading Championship! Who else is joining?".to_string(),
+                None,
+                None,
+                vec!["competition".to_string(), "trading".to_string()],
+                vec![trader2_id],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        
+        // Trader2 likes and comments on the post
+        social_trading_manager
+            .like_item(trader2_id, Some(post.id), None, None, None)
+            .await
+            .unwrap();
+        
+        social_trading_manager
+            .add_comment(
+                trader2_id,
+                Some(post.id),
+                None,
+                None,
+                None,
+                "I'm in too! May the best trader win.".to_string(),
+            )
+            .await
+            .unwrap();
+        
+        // Check the post's like and comment counts
+        let updated_post = social_post_store.get_post(&post.id).await.unwrap();
+        assert_eq!(updated_post.likes_count, 1);
+        assert_eq!(updated_post.comments_count, 1);
+    }
+    
+    #[tokio::test]
+    async fn test_copy_trading() {
+        // Create necessary components
+        let follower_store = Arc::new(FollowerStore::new());
+        let social_trade_store = Arc::new(SocialTradeStore::new());
+        let order_executor = Arc::new(MockOrderExecutor);
+        
+        // Create copy trading service
+        let copy_trading_service = Arc::new(CopyTradingService::new(
+            follower_store.clone(),
+            social_trade_store.clone(),
+            order_executor,
+        ));
+        
+        // Create two users
+        let trader_id = Uuid::new_v4();
+        let follower_id = Uuid::new_v4();
+        
+        // Create a follower relationship with copy trading enabled
+        let follower = Follower {
+            id: Uuid::new_v4(),
+            follower_id,
+            following_id: trader_id,
+            created_at: Utc::now(),
+            allocation: Some(dec!(20)), // 20% allocation
+            copy_trades: true,
+            copy_settings: CopyTradingSettings {
+                enabled: true,
+                allocation_percentage: dec!(20),
+                max_position_size: dec!(1000),
+                leverage_limit: Some(dec!(2)),
+                copy_stop_loss: true,
+                copy_take_profit: true,
+                exclude_assets: Vec::new(),
+                risk_multiplier: dec!(1),
+                auto_close_on_unfollow: true,
+            },
+        };
+        
+        follower_store.add_follower(follower).await.unwrap();
+        
+        // Create a trade by the followed trader
+        let trade = SocialTrade {
+            id: Uuid::new_v4(),
+            user_id: trader_id,
+            symbol: "ETH-USDT".to_string(),
+            side: Side::Buy,
+            size: dec!(2), // 2 ETH
+            entry_price: dec!(3000), // $3,000 per ETH
+            exit_price: None,
+            pnl: None,
+            pnl_percentage: None,
+            open_time: Utc::now(),
+            close_time: None,
+            is_open: true,
+            strategy_id: None,
+            likes_count: 0,
+            comments_count: 0,
+            is_public: true,
+            tags: vec!["ethereum".to_string(), "long".to_string()],
+            description: Some("Bullish on ETH".to_string()),
+            screenshot_url: None,
+            leverage: Some(dec!(3)), // 3x leverage
+            stop_loss: Some(dec!(2900)),
+            take_profit: Some(dec!(3300)),
+            copied_count: 0,
+            risk_reward_ratio: Some(dec!(3)),
+        };
+        
+        social_trade_store.add_trade(trade.clone()).await.unwrap();
+        
+        // Process the new trade for copy trading
+        let copied_trade_ids = copy_trading_service.process_new_trade(&trade).await.unwrap();
+        
+        // Should have created one copied trade
+        assert_eq!(copied_trade_ids.len(), 1);
+        
+        // Get the copied trade
+        let copied_trade = social_trade_store.get_trade(&copied_trade_ids[0]).await.unwrap();
+        
+        // Verify the copied trade properties
+        assert_eq!(copied_trade.user_id, follower_id);
+        assert_eq!(copied_trade.symbol, trade.symbol);
+        assert_eq!(copied_trade.side, trade.side);
+        assert_eq!(copied_trade.entry_price, trade.entry_price);
+        assert!(copied_trade.tags.contains(&"copied".to_string()));
+        
+        // Verify size was adjusted according to allocation percentage
+        assert_eq!(copied_trade.size, trade.size * dec!(0.2)); // 20% allocation
+        
+        // Verify leverage was limited according to settings
+        assert_eq!(copied_trade.leverage, Some(dec!(2))); // Limited to 2x
+        
+        // Verify stop loss and take profit were copied
+        assert_eq!(copied_trade.stop_loss, trade.stop_loss);
+        assert_eq!(copied_trade.take_profit, trade.take_profit);
+    }
+    
+    #[tokio::test]
+    async fn test_leaderboards_and_competitions() {
+        // Create stores
+        let leaderboard_store = Arc::new(LeaderboardStore::new());
+        let competition_store = Arc::new(CompetitionStore::new());
+        
+        // Create a leaderboard
+        let leaderboard = Leaderboard {
+            id: Uuid::new_v4(),
+            name: "Monthly Profit Champions".to_string(),
+            description: "Top traders by profit for the month".to_string(),
+            period: LeaderboardPeriod::Monthly,
+            category: LeaderboardCategory::ProfitPercentage,
+            entries: Vec::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            is_active: true,
+        };
+        
+        leaderboard_store.add_leaderboard(leaderboard.clone()).await.unwrap();
+        
+        // Create some users
+        let user1_id = Uuid::new_v4();
+        let user2_id = Uuid::new_v4();
+        let user3_id = Uuid::new_v4();
+        
+        // Add leaderboard entries
+        let entries = vec![
+            LeaderboardEntry {
+                user_id: user1_id,
+                rank: 1,
+                previous_rank: Some(3),
+                score: dec!(28.5),
+                change: dec!(15.2),
+            },
+            LeaderboardEntry {
+                user_id: user2_id,
+                rank: 2,
+                previous_rank: Some(1),
+                score: dec!(22.3),
+                change: dec!(-5.7),
+            },
+            LeaderboardEntry {
+                user_id: user3_id,
+                rank: 3,
+                previous_rank: Some(2),
+                score: dec!(18.9),
+                change: dec!(-2.1),
+            },
+        ];
+        
+        let mut updated_leaderboard = leaderboard.clone();
+        updated_leaderboard.entries = entries.clone();
+        
+        leaderboard_store.update_leaderboard(updated_leaderboard.clone()).await.unwrap();
+        
+        // Get leaderboard entries
+        let fetched_entries = leaderboard_store.get_leaderboard_entries(&leaderboard.id).await.unwrap();
+        assert_eq!(fetched_entries.len(), 3);
+        assert_eq!(fetched_entries[0].user_id, user1_id);
+        assert_eq!(fetched_entries[0].rank, 1);
+        
+        // Get user rankings
+        let rankings = leaderboard_store.get_user_rankings(&user2_id).await.unwrap();
+        assert_eq!(rankings.len(), 1);
+        assert_eq!(rankings[0].1, 2); // Rank 2
+        
+        // Create a competition
+        let now = Utc::now();
+        let competition = TradingCompetition {
+            id: Uuid::new_v4(),
+            name: "Spring Trading Cup".to_string(),
+            description: "Compete for the highest returns".to_string(),
+            rules: "Trade any pairs with a minimum of 5 trades".to_string(),
+            start_time: now + chrono::Duration::days(1),
+            end_time: now + chrono::Duration::days(8),
+            registration_deadline: now + chrono::Duration::hours(20),
+            prize_pool: dec!(5000),
+            prizes: vec![
+                CompetitionPrize {
+                    rank: 1,
+                    prize_amount: dec!(2500),
+                    prize_type: PrizeType::Cash,
+                    description: "First place".to_string(),
+                },
+                CompetitionPrize {
+                    rank: 2,
+                    prize_amount: dec!(1500),
+                    prize_type: PrizeType::Cash,
+                    description: "Second place".to_string(),
+                },
+                CompetitionPrize {
+                    rank: 3,
+                    prize_amount: dec!(1000),
+                    prize_type: PrizeType::Cash,
+                    description: "Third place".to_string(),
+                },
+            ],
+            participants: Vec::new(),
+            status: CompetitionStatus::RegistrationOpen,
+            allowed_assets: None,
+            min_trades: Some(5),
+            entry_fee: None,
+            maximum_participants: Some(50),
+            updated_at: now,
+        };
+        
+        competition_store.add_competition(competition.clone()).await.unwrap();
+        
+        // Register participants
+        competition_store.register_participant(&competition.id, &user1_id).await.unwrap();
+        competition_store.register_participant(&competition.id, &user2_id).await.unwrap();
+        
+        // Get competition
+        let updated_competition = competition_store.get_competition(&competition.id).await.unwrap();
+        assert_eq!(updated_competition.participants.len(), 2);
+        
+        // Update participant rankings
+        competition_store
+            .update_participant_ranking(&competition.id, &user1_id, 1, dec!(12.5))
+            .await
+            .unwrap();
+        
+        competition_store
+            .update_participant_ranking(&competition.id, &user2_id, 2, dec!(8.3))
+            .await
+            .unwrap();
+        
+        // Get active competitions
+        let active_competitions = competition_store.get_active_competitions().await.unwrap();
+        assert_eq!(active_competitions.len(), 1);
+        
+        // Get upcoming competitions
+        let upcoming_competitions = competition_store.get_upcoming_competitions().await.unwrap();
+        assert!(upcoming_competitions.is_empty()); // None as our competition is already in registration
+    }
+    
+    #[tokio::test]
+    async fn test_badges_and_achievements() {
+        // Create badge store
+        let badge_store = Arc::new(BadgeStore::new());
+        
+        // Create users
+        let user1_id = Uuid::new_v4();
+        let user2_id = Uuid::new_v4();
+        
+        // Create badges
+        let badge1 = Badge {
+            id: Uuid::new_v4(),
+            name: "Master Trader".to_string(),
+            description: "Achieved 10 consecutive profitable trades".to_string(),
+            icon_url: "https://example.com/badges/master_trader.png".to_string(),
+            category: BadgeCategory::Trading,
+            rarity: BadgeRarity::Epic,
+            created_at: Utc::now(),
+        };
+        
+        let badge2 = Badge {
+            id: Uuid::new_v4(),
+            name: "Community Leader".to_string(),
+            description: "Reached 100 followers".to_string(),
+            icon_url: "https://example.com/badges/community_leader.png".to_string(),
+            category: BadgeCategory::Social,
+            rarity: BadgeRarity::Rare,
+            created_at: Utc::now(),
+        };
+        
+        badge_store.add_badge(badge1.clone()).await.unwrap();
+        badge_store.add_badge(badge2.clone()).await.unwrap();
+        
+        // Award badges to users
+        badge_store.award_badge(&user1_id, &badge1.id).await.unwrap();
+        badge_store.award_badge(&user1_id, &badge2.id).await.unwrap();
+        badge_store.award_badge(&user2_id, &badge1.id).await.unwrap();
+        
+        // Get user badges
+        let user1_badges = badge_store.get_user_badges(&user1_id).await.unwrap();
+        let user2_badges = badge_store.get_user_badges(&user2_id).await.unwrap();
+        
+        assert_eq!(user1_badges.len(), 2);
+        assert_eq!(user2_badges.len(), 1);
+        
+        // Create achievements
+        let achievement1 = Achievement {
+            id: Uuid::new_v4(),
+            name: "First Trade".to_string(),
+            description: "Completed your first trade".to_string(),
+            icon_url: "https://example.com/achievements/first_trade.png".to_string(),
+            requirement: "Complete one trade".to_string(),
+            points: 10,
+            category: AchievementCategory::FirstSteps,
+            created_at: Utc::now(),
+        };
+        
+        let achievement2 = Achievement {
+            id: Uuid::new_v4(),
+            name: "Profitable Month".to_string(),
+            description: "Achieved a profitable month with at least 20 trades".to_string(),
+            icon_url: "https://example.com/achievements/profitable_month.png".to_string(),
+            requirement: "Complete 20+ trades with positive PnL in a calendar month".to_string(),
+            points: 50,
+            category: AchievementCategory::Consistency,
+            created_at: Utc::now(),
+        };
+        
+        badge_store.add_achievement(achievement1.clone()).await.unwrap();
+        badge_store.add_achievement(achievement2.clone()).await.unwrap();
+        
+        // Unlock achievements for users
+        badge_store.unlock_achievement(&user1_id, &achievement1.id).await.unwrap();
+        badge_store.unlock_achievement(&user2_id, &achievement1.id).await.unwrap();
+        badge_store.unlock_achievement(&user2_id, &achievement2.id).await.unwrap();
+        
+        // Get user achievements
+        let user1_achievements = badge_store.get_user_achievements(&user1_id).await.unwrap();
+        let user2_achievements = badge_store.get_user_achievements(&user2_id).await.unwrap();
+        
+        assert_eq!(user1_achievements.len(), 1);
+        assert_eq!(user2_achievements.len(), 2);
+        
+        // Update achievement progress
+        let complete = badge_store
+            .update_achievement_progress(&user1_id, &achievement2.id, 15)
+            .await
+            .unwrap();
+        
+        assert!(!complete); // 15/20 trades, not complete yet
+        
+        let complete = badge_store
+            .update_achievement_progress(&user1_id, &achievement2.id, 20)
+            .await
+            .unwrap();
+        
+        assert!(complete); // 20/20 trades, now complete
+        
+        // Get updated user achievements
+        let user1_achievements = badge_store.get_user_achievements(&user1_id).await.unwrap();
+        assert_eq!(user1_achievements.len(), 2); // Now has both achievements
+    }
+}
+.enabled = true;
+        copy_settings// src/social/mod.rs
+
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+use chrono::{DateTime, Utc};
+use anyhow::{Result, anyhow};
+use serde::{Serialize, Deserialize};
+use rust_decimal::Decimal;
+use async_trait::async_trait;
+
+use crate::trading_engine::matching_engine::{Side, OrderType, Order, OrderStatus};
+
+// Type definitions
+pub type UserId = Uuid;
+pub type FollowerId = Uuid;
+pub type TradeId = Uuid;
+pub type StrategyId = Uuid;
+pub type PostId = Uuid;
+pub type CommentId = Uuid;
+pub type LeaderboardId = Uuid;
+pub type CompetitionId = Uuid;
+pub type BadgeId = Uuid;
+pub type AchievementId = Uuid;
+
+// Social relationship between users
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Follower {
+    pub id: FollowerId,
+    pub follower_id: UserId,
+    pub following_id: UserId,
+    pub created_at: DateTime<Utc>,
+    pub allocation: Option<Decimal>, // For copy trading, percentage of portfolio allocated
+    pub copy_trades: bool,
+    pub copy_settings: CopyTradingSettings,
+}
+
+// Copy trading settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CopyTradingSettings {
+    pub enabled: bool,
+    pub allocation_percentage: Decimal,
+    pub max_position_size: Decimal,
+    pub leverage_limit: Option<Decimal>,
+    pub copy_stop_loss: bool,
+    pub copy_take_profit: bool,
+    pub exclude_assets: Vec<String>,
+    pub risk_multiplier: Decimal, // 1.0 = same risk, 0.5 = half risk, etc.
+    pub auto_close_on_unfollow: bool,
+}
+
+impl Default for CopyTradingSettings {
+    fn default() -> Self {
+        CopyTradingSettings {
+            enabled: false,
+            allocation_percentage: Decimal::new(10, 0), // 10%
+            max_position_size: Decimal::new(1000, 0),  // $1000
+            leverage_limit: Some(Decimal::new(2, 0)),  // 2x
+            copy_stop_loss: true,
+            copy_take_profit: true,
+            exclude_assets: Vec::new(),
+            risk_multiplier: Decimal::new(1, 0),       // Same risk
+            auto_close_on_unfollow: true,
+        }
+    }
+}
+
+// Trader profile for social features
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraderProfile {
+    pub user_id: UserId,
+    pub display_name: String,
+    pub bio: Option<String>,
+    pub profile_picture_url: Option<String>,
+    pub is_public: bool,
+    pub is_verified: bool,
+    pub followers_count: i32,
+    pub following_count: i32,
+    pub total_trades: i32,
+    pub win_rate: Decimal,
+    pub avg_profit: Decimal,
+    pub avg_loss: Decimal,
+    pub profit_factor: Decimal,
+    pub sharpe_ratio: Decimal,
+    pub max_drawdown: Decimal,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub badges: Vec<BadgeId>,
+    pub achievements: Vec<AchievementId>,
+    pub allow_copy_trading: bool,
+    pub performance_fee: Option<Decimal>, // Percentage fee for copy trading
+    pub lifetime_pnl: Decimal,
+    pub favorite_assets: Vec<String>,
+    pub trading_style: Option<String>,
+    pub risk_level: TradingRiskLevel,
+    pub average_holding_time: Option<String>,
+    pub biography: Option<String>,
+    pub website: Option<String>,
+    pub social_links: Vec<SocialLink>,
+}
+
+// Social media link
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialLink {
+    pub platform: String, // e.g., "twitter", "telegram", etc.
+    pub url: String,
+}
+
+// Risk level indicator for a trader
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradingRiskLevel {
+    Conservative,
+    Moderate,
+    Aggressive,
+    VeryAggressive,
+}
+
+// Public trade for social sharing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialTrade {
+    pub id: TradeId,
+    pub user_id: UserId,
+    pub symbol: String,
+    pub side: Side,
+    pub size: Decimal,
+    pub entry_price: Decimal,
+    pub exit_price: Option<Decimal>,
+    pub pnl: Option<Decimal>,
+    pub pnl_percentage: Option<Decimal>,
+    pub open_time: DateTime<Utc>,
+    pub close_time: Option<DateTime<Utc>>,
+    pub is_open: bool,
+    pub strategy_id: Option<StrategyId>,
+    pub likes_count: i32,
+    pub comments_count: i32,
+    pub is_public: bool,
+    pub tags: Vec<String>,
+    pub description: Option<String>,
+    pub screenshot_url: Option<String>,
+    pub leverage: Option<Decimal>,
+    pub stop_loss: Option<Decimal>,
+    pub take_profit: Option<Decimal>,
+    pub copied_count: i32,
+    pub risk_reward_ratio: Option<Decimal>,
+}
+
+// Trading strategies that can be shared or followed
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradingStrategy {
+    pub id: StrategyId,
+    pub user_id: UserId,
+    pub name: String,
+    pub description: String,
+    pub is_public: bool,
+    pub tags: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub performance: StrategyPerformance,
+    pub followers_count: i32,
+    pub trades_count: i32,
+    pub avg_trade_duration: Option<String>,
+    pub favorite_assets: Vec<String>,
+    pub risk_level: TradingRiskLevel,
+    pub automated: bool,
+    pub backtesting_results: Option<BacktestingResults>,
+    pub strategy_type: StrategyType,
+    pub settings: serde_json::Value, // Strategy-specific settings
+}
+
+// Strategy performance metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyPerformance {
+    pub win_rate: Decimal,
+    pub profit_factor: Decimal,
+    pub sharpe_ratio: Decimal,
+    pub sortino_ratio: Decimal,
+    pub max_drawdown: Decimal,
+    pub avg_profit: Decimal,
+    pub avg_loss: Decimal,
+    pub total_trades: i32,
+    pub profitable_trades: i32,
+    pub losing_trades: i32,
+    pub total_pnl: Decimal,
+    pub monthly_performance: Vec<MonthlyPerformance>,
+}
+
+// Monthly performance breakdown
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonthlyPerformance {
+    pub year: i32,
+    pub month: i32,
+    pub pnl: Decimal,
+    pub win_rate: Decimal,
+    pub trades_count: i32,
+}
+
+// Backtesting results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BacktestingResults {
+    pub start_date: DateTime<Utc>,
+    pub end_date: DateTime<Utc>,
+    pub initial_capital: Decimal,
+    pub final_capital: Decimal,
+    pub total_return: Decimal,
+    pub annualized_return: Decimal,
+    pub max_drawdown: Decimal,
+    pub sharpe_ratio: Decimal,
+    pub trades_count: i32,
+    pub win_rate: Decimal,
+}
+
+// Strategy types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StrategyType {
+    Trend,
+    Momentum,
+    MeanReversion,
+    Breakout,
+    Scalping,
+    DayTrading,
+    SwingTrading,
+    PositionTrading,
+    GridTrading,
+    Arbitrage,
+    MarketMaking,
+    Statistical,
+    MachineLearning,
+    Custom,
+}
+
+// Social post (like a tweet or forum post)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialPost {
+    pub id: PostId,
+    pub user_id: UserId,
+    pub content: String,
+    pub attachment_url: Option<String>,
+    pub attachment_type: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub likes_count: i32,
+    pub comments_count: i32,
+    pub shares_count: i32,
+    pub is_pinned: bool,
+    pub tags: Vec<String>,
+    pub mentioned_users: Vec<UserId>,
+    pub linked_trade_id: Option<TradeId>,
+    pub linked_strategy_id: Option<StrategyId>,
+}
+
+// Comment on a post or trade
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: CommentId,
+    pub user_id: UserId,
+    pub post_id: Option<PostId>,
+    pub trade_id: Option<TradeId>,
+    pub strategy_id: Option<StrategyId>,
+    pub parent_comment_id: Option<CommentId>,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub likes_count: i32,
+}
+
+// Like on a post, trade, comment, or strategy
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Like {
+    pub user_id: UserId,
+    pub post_id: Option<PostId>,
+    pub trade_id: Option<TradeId>,
+    pub comment_id: Option<CommentId>,
+    pub strategy_id: Option<StrategyId>,
+    pub created_at: DateTime<Utc>,
+}
+
+// Trader leaderboard
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Leaderboard {
+    pub id: LeaderboardId,
+    pub name: String,
+    pub description: String,
+    pub period: LeaderboardPeriod,
+    pub category: LeaderboardCategory,
+    pub entries: Vec<LeaderboardEntry>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub is_active: bool,
+}
+
+// Leaderboard entry for a trader
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaderboardEntry {
+    pub user_id: UserId,
+    pub rank: i32,
+    pub previous_rank: Option<i32>,
+    pub score: Decimal,
+    pub change: Decimal, // Change from previous period
+}
+
+// Leaderboard time periods
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LeaderboardPeriod {
+    Daily,
+    Weekly,
+    Monthly,
+    Quarterly,
+    Yearly,
+    AllTime,
+}
+
+// Leaderboard categories
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LeaderboardCategory {
+    ProfitPercentage,
+    AbsoluteProfit,
+    WinRate,
+    TradeVolume,
+    CopiedTraders,
+    Followers,
+    SharpestRatio,
+    ConsistentPerformance,
+}
+
+// Trading competition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradingCompetition {
+    pub id: CompetitionId,
+    pub name: String,
+    pub description: String,
+    pub rules: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub registration_deadline: DateTime<Utc>,
+    pub prize_pool: Decimal,
+    pub prizes: Vec<CompetitionPrize>,
+    pub participants: Vec<CompetitionParticipant>,
+    pub status: CompetitionStatus,
+    pub allowed_assets: Option<Vec<String>>,
+    pub min_trades: Option<i32>,
+    pub entry_fee: Option<Decimal>,
+    pub maximum_participants: Option<i32>,
+    pub updated_at: DateTime<Utc>,
+}
+
+// Prize structure for a competition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompetitionPrize {
+    pub rank: i32,
+    pub prize_amount: Decimal,
+    pub prize_type: PrizeType,
+    pub description: String,
+}
+
+// Types of prizes
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrizeType {
+    Cash,
+    Token,
+    NFT,
+    PhysicalItem,
+    TradingFeeDiscount,
+    DepositBonus,
+    Other,
+}
+
+// Participant in a trading competition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompetitionParticipant {
+    pub user_id: UserId,
+    pub registration_time: DateTime<Utc>,
+    pub current_rank: Option<i32>,
+    pub current_pnl: Option<Decimal>,
+    pub trade_count: i32,
+    pub disqualified: bool,
+    pub disqualification_reason: Option<String>,
+}
+
+// Status of a competition
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompetitionStatus {
+    Upcoming,
+    RegistrationOpen,
+    InProgress,
+    Completed,
+    Cancelled,
+}
+
+// Badges awarded to traders
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Badge {
+    pub id: BadgeId,
+    pub name: String,
+    pub description: String,
+    pub icon_url: String,
+    pub category: BadgeCategory,
+    pub rarity: BadgeRarity,
+    pub created_at: DateTime<Utc>,
+}
+
+// Badge categories
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BadgeCategory {
+    Trading,
+    Social,
+    Competition,
+    Loyalty,
+    Special,
+}
+
+// Badge rarity levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BadgeRarity {
+    Common,
+    Uncommon,
+    Rare,
+    Epic,
+    Legendary,
+}
+
+// Achievements that can be unlocked
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Achievement {
+    pub id: AchievementId,
+    pub name: String,
+    pub description: String,
+    pub icon_url: String,
+    pub requirement: String,
+    pub points: i32,
+    pub category: AchievementCategory,
+    pub created_at: DateTime<Utc>,
+}
+
+// User's unlocked achievement
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserAchievement {
+    pub user_id: UserId,
+    pub achievement_id: AchievementId,
+    pub unlocked_at: DateTime<Utc>,
+    pub progress: i32, // For achievements with multiple levels
+    pub max_progress: i32,
+}
+
+// Achievement categories
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AchievementCategory {
+    FirstSteps,
+    Trading,
+    ProfitMilestones,
+    SocialActivity,
+    CompetitionWinner,
+    Consistency,
+    RiskManagement,
+    Special,
+}
+
+// Notification preferences
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationPreferences {
+    pub user_id: UserId,
+    pub new_follower: bool,
+    pub new_comment: bool,
+    pub new_like: bool,
+    pub copied_trade: bool,
+    pub trade_updates: bool,
+    pub price_alerts: bool,
+    pub competition_updates: bool,
+    pub leaderboard_updates: bool,
+    pub achievement_unlocked: bool,
+    pub badge_earned: bool,
+    pub email_notifications: bool,
+    pub push_notifications: bool,
+    pub telegram_notifications: bool,
+}
+
+// Interface for copy trading execution
+#[async_trait]
+pub trait CopyTradingExecutor: Send + Sync {
+    async fn copy_trade(&self, original_trade: &SocialTrade, follower_id: &UserId) -> Result<TradeId>;
+    async fn close_copied_trade(&self, original_trade: &SocialTrade, follower_id: &UserId) -> Result<()>;
+    async fn update_copy_settings(&self, follower_id: &UserId, settings: CopyTradingSettings) -> Result<()>;
+    async fn get_copy_statistics(&self, user_id: &UserId) -> Result<CopyTradingStatistics>;
+}
+
+// Copy trading statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CopyTradingStatistics {
+    pub user_id: UserId,
+    pub total_copied_trades: i32,
+    pub active_copied_trades: i32,
+    pub total_traders_copied: i32,
+    pub total_followers: i32,
+    pub total_pnl: Decimal,
+    pub avg_pnl_per_trade: Decimal,
+    pub best_performing_trader: Option<UserId>,
+    pub worst_performing_trader: Option<UserId>,
+    pub copy_trading_since: DateTime<Utc>,
+}
+
+// Store for trader profiles
+pub struct TraderProfileStore {
+    profiles: RwLock<Vec<TraderProfile>>,
+}
+
+impl TraderProfileStore {
+    pub fn new() -> Self {
+        TraderProfileStore {
+            profiles: RwLock::new(Vec::new()),
+        }
+    }
+    
+    pub async fn add_profile(&self, profile: TraderProfile) -> Result<()> {
+        let mut profiles = self.profiles.write().await;
+        
+        // Check if profile already exists
+        if profiles.iter().any(|p| p.user_id == profile.user_id) {
+            return Err(anyhow!("Profile already exists for user: {}", profile.user_id));
+        }
+        
+        profiles.push(profile);
+        Ok(())
+    }
+    
+    pub async fn get_profile(&self, user_id: &UserId) -> Result<TraderProfile> {
+        let profiles = self.profiles.read().await;
+        profiles
+            .iter()
+            .find(|p| p.user_id == *user_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Trader profile not found for user: {}", user_id))
+    }
+    
+    pub async fn update_profile(&self, profile: TraderProfile) -> Result<()> {
+        let mut profiles = self.profiles.write().await;
+        
+        let index = profiles
+            .iter()
+            .position(|p| p.user_id == profile.user_id)
+            .ok_or_else(|| anyhow!("Trader profile not found for user: {}", profile.user_id))?;
+        
+        profiles[index] = profile;
+        Ok(())
+    }
+    
+    pub async fn get_top_traders(&self, limit: usize) -> Result<Vec<TraderProfile>> {
+        let profiles = self.profiles.read().await;
+        
+        // Sort by profit factor (or any other metric)
+        let mut sorted_profiles = profiles.clone();
+        sorted_profiles.sort_by(|a, b| b.profit_factor.cmp(&a.profit_factor));
+        
+        Ok(sorted_profiles.into_iter().take(limit).collect())
+    }
+    
+    pub async fn search_traders(&self, query: &str) -> Result<Vec<TraderProfile>> {
+        let profiles = self.profiles.read().await;
+        
+        let results: Vec<TraderProfile> = profiles
+            .iter()
+            .filter(|p| {
+                p.display_name.to_lowercase().contains(&query.to_lowercase())
+                    || p.trading_style.as_ref().map_or(false, |s| s.to_lowercase().contains(&query.to_lowercase()))
+                    || p.favorite_assets.iter().any(|a| a.to_lowercase().contains(&query.to_lowercase()))
+            })
+            .cloned()
+            .collect();
+        
+        Ok(results)
+    }
+}
+
+// Store for social trades
+pub struct SocialTradeStore {
+    trades: RwLock<Vec<SocialTrade>>,
+}
+
+impl SocialTradeStore {
+    pub fn new() -> Self {
+        SocialTradeStore {
+            trades: RwLock::new(Vec::new()),
+        }
+    }
+    
+    pub async fn add_trade(&self, trade: SocialTrade) -> Result<TradeId> {
+        let mut trades = self.trades.write().await;
