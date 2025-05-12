@@ -1,53 +1,47 @@
-# WorldClass Crypto Exchange: Deployment Guide
-
-## Overview
-
+WorldClass Crypto Exchange: Deployment Guide
+Overview
 This document outlines the deployment process for the WorldClass Crypto Exchange platform. It covers infrastructure setup, security requirements, deployment pipeline, and monitoring configuration. The deployment follows a multi-environment approach with separate development, staging, and production environments.
 
-## Prerequisites
-
-### Infrastructure Requirements
-
-* **Kubernetes Cluster**
-  - Minimum 5 nodes per environment (dev/staging/prod)
-  - Node specs: 16 CPU cores, 64GB RAM, 500GB SSD
-  - Kubernetes version: 1.26+
-  - Network policies enabled
-  - Pod security policies enabled
-
-* **Database Infrastructure**
-  - PostgreSQL 15.0+ (for user data, transaction records)
-  - TimescaleDB 2.10+ (for time-series market data)
-  - Redis 7.0+ cluster (for caching and real-time processing)
-
-* **Security Infrastructure**
-  - Hardware Security Modules (HSMs) for key management
-  - Multiple geographic locations for cold storage keys
-  - WAF (Web Application Firewall) for API endpoints
-  - DDoS protection services
-
-* **Monitoring Infrastructure**
-  - Prometheus and Grafana for metrics
-  - ELK stack for log aggregation
-  - Jaeger for distributed tracing
-  - PagerDuty integration for alerts
-
-### Access Requirements
-
-* **Service Accounts**
-  - CI/CD pipeline service account
-  - Database administration service account
-  - Kubernetes administration service account
-
-* **Security Credentials**
-  - SSL certificates for all domains
-  - HSM access credentials
-  - Cloud provider API credentials
-  - Registry access credentials
-
-## Deployment Architecture
-
-```
+Prerequisites
+Infrastructure Requirements
+Kubernetes Cluster
+Minimum 5 nodes per environment (dev/staging/prod)
+Node specs: 16 CPU cores, 64GB RAM, 500GB SSD
+Kubernetes version: 1.26+
+Network policies enabled
+Pod security policies enabled
+Database Infrastructure
+PostgreSQL 15.0+ (for user data, transaction records)
+TimescaleDB 2.10+ (for time-series market data)
+Redis 7.0+ cluster (for caching and real-time processing)
+Security Infrastructure
+Hardware Security Modules (HSMs) for key management
+Multiple geographic locations for cold storage keys
+WAF (Web Application Firewall) for API endpoints
+DDoS protection services
+Monitoring Infrastructure
+Prometheus and Grafana for metrics
+ELK stack for log aggregation
+Jaeger for distributed tracing
+PagerDuty integration for alerts
+Access Requirements
+Service Accounts
+CI/CD pipeline service account
+Database administration service account
+Kubernetes administration service account
+Security Credentials
+SSL certificates for all domains
+HSM access credentials
+Cloud provider API credentials
+Registry access credentials
+Software Requirements
+Rust: 1.70.0 or later
+Docker: 24.0 or later
+Kubernetes CLI: 1.26+
+Terraform: 1.5+
+Helm: 3.12+
+istioctl: 1.18+
+Deployment Architecture
 [External Users] → [DDoS Protection] → [Load Balancer] → [WAF] → [API Gateway]
                                                               ↓
 [Admin Users] → [Admin VPN] → [Load Balancer] → [WAF] → [Admin API]
@@ -63,13 +57,39 @@ This document outlines the deployment process for the WorldClass Crypto Exchange
                                       ┌─────────────┬────────────┬─────────────┐
                                       ↓             ↓            ↓             ↓
                                  [PostgreSQL]   [TimescaleDB]  [Redis]    [RocksDB]
-```
+Development Environment Setup
+For local development and testing:
 
-## Infrastructure Setup
+Clone the repository:
+bash
+git clone https://github.com/shyamanurag/WorldClassCryptoExchange.git
+cd WorldClassCryptoExchange
+Create a .env file with the following environment variables:
+DATABASE_URL=postgres://username:password@localhost:5432/crypto_exchange
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=your_random_secure_jwt_secret_here
+REFRESH_SECRET=your_random_secure_refresh_secret_here
+LOG_LEVEL=debug
+RUST_BACKTRACE=1
+Set up the database:
+bash
+# Create PostgreSQL database
+createdb crypto_exchange
 
-### 1. Kubernetes Cluster Setup
+# Run migrations (this will be handled automatically when running the application)
+Build and run the application:
+bash
+# Build
+cargo build
 
-```bash
+# Run
+cargo run
+Run tests:
+bash
+cargo test
+Infrastructure Setup
+1. Kubernetes Cluster Setup
+bash
 # Create Kubernetes cluster using Terraform
 cd infrastructure/terraform
 terraform init
@@ -80,11 +100,8 @@ aws eks update-kubeconfig --name worldclass-crypto-production
 
 # Verify cluster
 kubectl get nodes
-```
-
-### 2. Database Provisioning
-
-```bash
+2. Database Provisioning
+bash
 # Deploy PostgreSQL using Helm
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm install postgresql bitnami/postgresql \
@@ -102,11 +119,8 @@ helm install timescaledb timescale/timescaledb-single \
 helm install redis bitnami/redis \
   --namespace database \
   --values infrastructure/helm/redis-values.yaml
-```
-
-### 3. Secrets Management
-
-```bash
+3. Secrets Management
+bash
 # Initialize Vault
 helm repo add hashicorp https://helm.releases.hashicorp.com
 helm install vault hashicorp/vault \
@@ -125,11 +139,8 @@ kubectl exec -n vault vault-0 -- vault kv put secret/db/postgresql \
 
 kubectl exec -n vault vault-0 -- vault kv put secret/hsm \
   api-key=<hsm-api-key>
-```
-
-### 4. Service Mesh Configuration
-
-```bash
+4. Service Mesh Configuration
+bash
 # Install Istio
 istioctl install --set profile=default -f infrastructure/istio/istio-config.yaml
 
@@ -137,22 +148,66 @@ istioctl install --set profile=default -f infrastructure/istio/istio-config.yaml
 kubectl label namespace default istio-injection=enabled
 kubectl label namespace trading istio-injection=enabled
 kubectl label namespace wallet istio-injection=enabled
-```
+Docker Deployment
+For containerized development/testing:
 
-## Deployment Pipeline
+Build the Docker image:
+bash
+docker build -t worldclass-crypto-exchange:latest .
+Run with Docker Compose: Create a docker-compose.yml file:
+yaml
+version: '3.8'
 
-### 1. CI/CD Pipeline Setup
+services:
+  app:
+    image: worldclass-crypto-exchange:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://username:password@postgres:5432/crypto_exchange
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your_random_secure_jwt_secret_here
+      - REFRESH_SECRET=your_random_secure_refresh_secret_here
+      - LOG_LEVEL=info
+    depends_on:
+      - postgres
+      - redis
+  
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=username
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=crypto_exchange
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
 
-The platform uses GitLab CI/CD for the deployment pipeline. The pipeline is defined in `.gitlab-ci.yml` and includes the following stages:
+volumes:
+  postgres-data:
+  redis-data:
+Start the services:
+bash
+docker-compose up -d
+Deployment Pipeline
+1. CI/CD Pipeline Setup
+The platform uses GitLab CI/CD for the deployment pipeline. The pipeline is defined in .gitlab-ci.yml and includes the following stages:
 
-1. **Build**: Compile code and build container images
-2. **Test**: Run unit tests, integration tests, and security tests
-3. **Scan**: Perform security scanning and dependency analysis
-4. **Publish**: Push container images to registry
-5. **Deploy**: Deploy to Kubernetes cluster
-6. **Verify**: Run post-deployment tests
-
-```yaml
+Build: Compile code and build container images
+Test: Run unit tests, integration tests, and security tests
+Scan: Perform security scanning and dependency analysis
+Publish: Push container images to registry
+Deploy: Deploy to Kubernetes cluster
+Verify: Run post-deployment tests
+yaml
 # Example .gitlab-ci.yml snippet
 stages:
   - build
@@ -214,20 +269,16 @@ deploy_production:
   only:
     - tags
   when: manual
-```
-
-### 2. Deployment Strategies
-
+2. Deployment Strategies
 Different components use different deployment strategies based on their criticality:
 
-* **Trading Engine**: Blue-Green deployment
-* **Wallet Services**: Canary deployment
-* **API Gateway**: Rolling update
-* **Admin Dashboard**: Rolling update
-
+Trading Engine: Blue-Green deployment
+Wallet Services: Canary deployment
+API Gateway: Rolling update
+Admin Dashboard: Rolling update
 Example blue-green deployment configuration:
 
-```yaml
+yaml
 # kubernetes/trading-engine/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -264,16 +315,12 @@ spec:
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
-```
-
-### 3. Rollback Procedures
-
+3. Rollback Procedures
 In case of deployment failures, the following rollback procedures are implemented:
 
-1. **Automated Rollback**: If health checks fail after deployment, automatic rollback to the previous version
-2. **Manual Rollback**: For more complex issues, manual rollback command can be executed
-
-```bash
+Automated Rollback: If health checks fail after deployment, automatic rollback to the previous version
+Manual Rollback: For more complex issues, manual rollback command can be executed
+bash
 # Automated rollback is triggered by CI/CD pipeline
 
 # Manual rollback command
@@ -281,13 +328,9 @@ kubectl rollout undo deployment/trading-engine -n trading
 
 # For blue-green deployments
 kubectl apply -f kubernetes/trading-engine/service-green.yaml  # Switch back to green
-```
-
-## Security Configuration
-
-### 1. Network Security
-
-```yaml
+Security Configuration
+1. Network Security
+yaml
 # Example NetworkPolicy
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -317,11 +360,8 @@ spec:
     ports:
     - protocol: TCP
       port: 5432
-```
-
-### 2. Pod Security Policies
-
-```yaml
+2. Pod Security Policies
+yaml
 # Example PodSecurityPolicy
 apiVersion: policy/v1beta1
 kind: PodSecurityPolicy
@@ -357,13 +397,10 @@ spec:
       - min: 1
         max: 65535
   readOnlyRootFilesystem: true
-```
-
-### 3. Secret Management
-
+3. Secret Management
 Secrets are managed through HashiCorp Vault and mounted into Kubernetes pods:
 
-```yaml
+yaml
 # Example Kubernetes deployment with Vault integration
 apiVersion: apps/v1
 kind: Deployment
@@ -391,13 +428,9 @@ spec:
         env:
         - name: DB_CREDS_PATH
           value: /vault/secrets/db-creds
-```
-
-## Monitoring and Alerting
-
-### 1. Prometheus Configuration
-
-```yaml
+Monitoring and Alerting
+1. Prometheus Configuration
+yaml
 # prometheus/trading-engine-rules.yaml
 groups:
 - name: trading-engine
@@ -419,11 +452,8 @@ groups:
     annotations:
       summary: "High error rate in trading engine"
       description: "Error rate is above 1% for 5 minutes"
-```
-
-### 2. Log Aggregation
-
-```yaml
+2. Log Aggregation
+yaml
 # Example Fluentd configuration for log collection
 apiVersion: apps/v1
 kind: DaemonSet
@@ -461,11 +491,8 @@ spec:
       - name: varlibdockercontainers
         hostPath:
           path: /var/lib/docker/containers
-```
-
-### 3. Distributed Tracing
-
-```yaml
+3. Distributed Tracing
+yaml
 # Example Jaeger configuration
 apiVersion: jaegertracing.io/v1
 kind: Jaeger
@@ -479,17 +506,59 @@ spec:
     options:
       es:
         server-urls: http://elasticsearch:9200
-```
+4. Performance Monitoring Dashboards
+Set up the following Grafana dashboards:
 
-## Cold Storage Deployment
+Trading Engine Performance
+Order Processing Latency
+API Response Times
+Database Query Performance
+System Resource Usage
+Security Monitoring
+Example Grafana dashboard configuration:
 
+yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+data:
+  trading-engine-dashboard.json: |
+    {
+      "title": "Trading Engine Performance",
+      "panels": [
+        {
+          "title": "Order Processing Rate",
+          "type": "graph",
+          "datasource": "Prometheus",
+          "targets": [
+            {
+              "expr": "sum(rate(trading_engine_orders_processed_total[5m]))",
+              "legendFormat": "Orders/sec"
+            }
+          ]
+        },
+        {
+          "title": "P95 Latency",
+          "type": "graph",
+          "datasource": "Prometheus",
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(trading_engine_order_processing_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P95 Latency"
+            }
+          ]
+        }
+      ]
+    }
+Cold Storage Deployment
 The cold storage system requires special handling for deployment:
 
-1. **Key Generation Ceremony**: Conducted offline with multiple authorized personnel
-2. **Hardware Security Modules**: Initialized and configured in secure facilities
-3. **Geographic Distribution**: Keys stored in multiple secure locations
-
-```bash
+Key Generation Ceremony: Conducted offline with multiple authorized personnel
+Hardware Security Modules: Initialized and configured in secure facilities
+Geographic Distribution: Keys stored in multiple secure locations
+bash
 # Example of offline key generation script (run in secure environment)
 ./scripts/cold_storage_key_generation.sh \
   --threshold 3 \
@@ -503,13 +572,36 @@ for location in london tokyo singapore sydney zurich; do
     --share-file /secure/cold-storage-keys/share-$location.key \
     --hsm-id $location-hsm-001
 done
-```
+High Availability Configuration
+For production environments:
 
-## Environment-Specific Configurations
-
-### Development Environment
-
-```yaml
+Database High Availability:
+Deploy PostgreSQL with replication
+Configure automatic failover
+Set up regular backups
+Example using postgresql-ha Helm chart:
+bash
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm install postgresql-ha bitnami/postgresql-ha \
+  --set postgresql.replication.enabled=true \
+  --set postgresql.replication.numReplicas=2
+Application Scalability:
+Configure horizontal pod autoscaling
+bash
+kubectl apply -f k8s/hpa.yaml
+Redis Cluster:
+Set up Redis in cluster mode
+bash
+helm install redis bitnami/redis-cluster \
+  --set cluster.nodes=6 \
+  --set cluster.replicas=1
+Cross-Region Redundancy:
+Deploy infrastructure across multiple regions
+Implement global load balancing
+Configure cross-region data replication
+Environment-Specific Configurations
+Development Environment
+yaml
 # development/values.yaml
 environment: development
 replicas:
@@ -527,11 +619,8 @@ resources:
 database:
   host: postgres-dev.example.com
   name: worldclass_dev
-```
-
-### Staging Environment
-
-```yaml
+Staging Environment
+yaml
 # staging/values.yaml
 environment: staging
 replicas:
@@ -549,11 +638,8 @@ resources:
 database:
   host: postgres-staging.example.com
   name: worldclass_staging
-```
-
-### Production Environment
-
-```yaml
+Production Environment
+yaml
 # production/values.yaml
 environment: production
 replicas:
@@ -571,75 +657,60 @@ resources:
 database:
   host: postgres-production.example.com
   name: worldclass_production
-```
-
-## Deployment Checklist
-
+Deployment Checklist
 Before deploying to production, ensure the following checklist is completed:
 
-### Pre-Deployment Checks
-
-- [ ] All unit tests passing
-- [ ] Integration tests passing
-- [ ] Security scan completed with no critical issues
-- [ ] Performance testing completed
-- [ ] Dependency audit completed
-- [ ] Documentation updated
-- [ ] Rollback procedures tested
-- [ ] Cold storage system tested
-- [ ] Approval from security team
-- [ ] Approval from compliance team
-
-### Deployment Process
-
-1. Announce maintenance window (if applicable)
-2. Deploy database migrations
-3. Deploy API gateway updates
-4. Deploy microservices
-5. Deploy trading engine
-6. Deploy admin dashboard
-7. Update load balancer configuration
-8. Run health checks
-9. Verify monitoring and alerting
-
-### Post-Deployment Checks
-
-- [ ] API endpoints returning correct responses
-- [ ] Trading engine processing orders correctly
-- [ ] Wallet service handling transactions
-- [ ] Admin dashboard accessible
-- [ ] Monitoring dashboards showing expected metrics
-- [ ] Logs being collected properly
-- [ ] Transaction testing completed
-- [ ] Security audit of deployed services
-
-## Disaster Recovery
-
-### Backup Procedures
-
-1. Database backups:
-   - Full backup daily
-   - Incremental backups hourly
-   - Transaction log shipping continuous
-
-2. Configuration backups:
-   - Kubernetes configuration backed up daily
-   - Vault configuration backed up after changes
-   - Secrets backed up using secure procedure
-
-### Recovery Procedures
-
-1. **Database Recovery**:
-```bash
+Pre-Deployment Checks
+ All unit tests passing
+ Integration tests passing
+ Security scan completed with no critical issues
+ Performance testing completed
+ Dependency audit completed
+ Documentation updated
+ Rollback procedures tested
+ Cold storage system tested
+ Approval from security team
+ Approval from compliance team
+Deployment Process
+Announce maintenance window (if applicable)
+Deploy database migrations
+Deploy API gateway updates
+Deploy microservices
+Deploy trading engine
+Deploy admin dashboard
+Update load balancer configuration
+Run health checks
+Verify monitoring and alerting
+Post-Deployment Checks
+ API endpoints returning correct responses
+ Trading engine processing orders correctly
+ Wallet service handling transactions
+ Admin dashboard accessible
+ Monitoring dashboards showing expected metrics
+ Logs being collected properly
+ Transaction testing completed
+ Security audit of deployed services
+ Performance metrics within expected range
+Backup and Disaster Recovery
+Backup Procedures
+Database backups:
+Full backup daily
+Incremental backups hourly
+Transaction log shipping continuous
+Configuration backups:
+Kubernetes configuration backed up daily
+Vault configuration backed up after changes
+Secrets backed up using secure procedure
+Recovery Procedures
+Database Recovery:
+bash
 # Restore PostgreSQL database
 pg_restore -h postgres-production.example.com -U admin -d worldclass_production backup.sql
 
 # Verify data integrity
 ./scripts/verify_data_integrity.sh
-```
-
-2. **Infrastructure Recovery**:
-```bash
+Infrastructure Recovery:
+bash
 # Restore Kubernetes cluster from backup
 terraform apply -var-file=environments/production.tfvars
 
@@ -649,41 +720,176 @@ kubectl apply -f kubernetes/production-backup/
 # Verify cluster health
 kubectl get nodes
 kubectl get pods --all-namespaces
-```
-
-3. **Cold Storage Recovery**:
-```bash
+Cold Storage Recovery:
+bash
 # Initiate cold storage recovery (requires multiple authorized personnel)
 ./scripts/cold_storage_recovery.sh \
   --threshold 3 \
   --shares-location /secure/recovery-shares/
-```
+Disaster Recovery Plan
+A comprehensive disaster recovery plan includes:
 
-## Compliance Documentation
-
+RTO (Recovery Time Objective): 4 hours for critical systems
+RPO (Recovery Point Objective): 5 minutes for transaction data
+Geographic Redundancy: Infrastructure deployed across multiple regions
+Cross-Region Failover: Automated failover to backup regions
+Data Recovery: Procedures for restoring from backups
+Communication Plan: Clear communication channels for disaster scenarios
+Regular DR Drills: Quarterly testing of recovery procedures
+Performance Tuning
+Database Optimization:
+Configure PostgreSQL for high throughput:
+max_connections = 200
+shared_buffers = 8GB
+effective_cache_size = 24GB
+maintenance_work_mem = 2GB
+checkpoint_completion_target = 0.9
+wal_buffers = 16MB
+default_statistics_target = 100
+random_page_cost = 1.1
+effective_io_concurrency = 200
+work_mem = 41943kB
+min_wal_size = 2GB
+max_wal_size = 8GB
+Application Performance:
+Adjust thread pool sizes:
+rust
+// Example configuration
+tokio::runtime::Builder::new_multi_thread()
+    .worker_threads(32)
+    .enable_all()
+    .build()
+Configure connection pooling:
+rust
+let mut config = deadpool_postgres::Config::new();
+config.dbname = Some("worldclass_production".to_string());
+config.host = Some("postgres-production.example.com".to_string());
+config.user = Some("app_user".to_string());
+config.password = Some("password".to_string());
+config.max_size = 50;
+Network Optimization:
+Minimize latency between components
+Configure appropriate buffer sizes
+Implement TCP optimization
+Compliance Documentation
 Maintain the following documentation for compliance purposes:
 
-1. Deployment logs
-2. Access logs
-3. Audit trails
-4. Security scan reports
-5. Penetration test reports
-6. Change management records
+Deployment logs
+Access logs
+Audit trails
+Security scan reports
+Penetration test reports
+Change management records
+Continuous Deployment
+Set up GitOps workflow for continuous deployment:
 
-## Contact Information
+GitOps Repository Structure:
+infrastructure-repo/
+├── base/
+│   ├── trading-engine/
+│   ├── wallet-service/
+│   └── api-gateway/
+├── overlays/
+│   ├── development/
+│   ├── staging/
+│   └── production/
+└── scripts/
+Example GitHub Actions workflow:
+yaml
+name: Deploy to Kubernetes
 
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: your-registry.io
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          tags: your-registry.io/worldclass-crypto-exchange:${{ github.sha }}
+
+      - name: Set up Kubernetes
+        uses: azure/k8s-set-context@v3
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          sed -i "s|IMAGE_TAG|${{ github.sha }}|g" k8s/app-deployment.yaml
+          kubectl apply -f k8s/app-deployment.yaml
+Security Best Practices
+Container Security:
+Use distroless or minimal base images
+Run containers as non-root users
+Implement image scanning in CI/CD pipeline
+Use admission controllers for security policies
+Network Security:
+Implement network segmentation
+Use encryption for all traffic (TLS)
+Configure proper firewall rules
+Implement intrusion detection systems
+Access Control:
+Implement Role-Based Access Control (RBAC)
+Use temporary credentials for human access
+Implement multi-factor authentication
+Regular credential rotation
+Troubleshooting
+Common deployment issues and solutions:
+
+Database Connection Issues:
+Check network connectivity
+Verify credentials in secrets
+Ensure database service is running
+Application Startup Failures:
+Check logs using kubectl logs <pod-name>
+Verify environment variables
+Check for missing dependencies
+Performance Degradation:
+Monitor system resources
+Check for database query bottlenecks
+Analyze network traffic
+Maintenance Procedures
+Regular Updates:
+Apply security patches promptly
+Schedule maintenance windows
+Communicate downtime in advance
+Database Maintenance:
+Regular VACUUM and ANALYZE
+Index maintenance
+Performance tuning
+Scaling Procedures:
+Guidelines for scaling up/out
+Monitoring thresholds for autoscaling
+Contact Information
 For deployment issues, contact:
 
-- **DevOps Lead**: [devops-lead@example.com](mailto:devops-lead@example.com)
-- **Security Team**: [security@example.com](mailto:security@example.com)
-- **Database Admin**: [dba@example.com](mailto:dba@example.com)
-
+DevOps Lead: devops-lead@example.com
+Security Team: security@example.com
+Database Admin: dba@example.com
 Emergency contacts:
-- **On-call Engineer**: +1-555-123-4567
-- **Security Officer**: +1-555-987-6543
 
-## Additional Resources
+On-call Engineer: +1-555-123-4567
+Security Officer: +1-555-987-6543
+Additional Resources
+Internal Wiki: Deployment Procedures
+Knowledge Base: Common Issues
+Runbook: Emergency Procedures
+This deployment guide should be updated regularly as the system evolves. Last updated: May 12, 2025.
 
-- [Internal Wiki: Deployment Procedures](https://wiki.example.com/deployment)
-- [Knowledge Base: Common Issues](https://kb.example.com/deployment-issues)
-- [Runbook: Emergency Procedures](https://runbooks.example.com/emergency)
