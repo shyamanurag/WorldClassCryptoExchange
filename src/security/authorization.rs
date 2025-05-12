@@ -1,70 +1,256 @@
-// src/security/authorization.rs
-use std::collections::HashSet;
+// src/security/auth.rs - Authentication service
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use thiserror::Error;
 use uuid::Uuid;
+use log::{debug, error};
 
-pub struct Permission(String);
+use crate::config::Config;
 
-impl Permission {
-    pub fn new(name: &str) -> Self {
-        Self(name.to_string())
-    }
+/// JWT claims
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    /// Subject (user ID)
+    pub sub: String,
+    /// Issued at timestamp
+    pub iat: u64,
+    /// Expiration timestamp
+    pub exp: u64,
+    /// User roles
+    pub roles: Vec<String>,
 }
 
-pub struct Role {
-    name: String,
-    permissions: HashSet<String>,
+/// Authentication error
+#[derive(Error, Debug)]
+pub enum AuthError {
+    #[error("Failed to encode JWT: {0}")]
+    JwtEncodeError(#[from] jsonwebtoken::errors::Error),
+    
+    #[error("Invalid token")]
+    InvalidToken,
+    
+    #[error("Token expired")]
+    TokenExpired,
+    
+    #[error("User not found")]
+    UserNotFound,
 }
 
-impl Role {
-    pub fn new(name: &str) -> Self {
+/// Authentication service
+pub struct AuthService {
+    /// JWT secret
+    jwt_secret: String,
+    
+    /// Refresh token secret
+    refresh_secret: String,
+    
+    /// Token expiry time
+    token_expiry: Duration,
+    
+    /// Refresh token expiry time
+    refresh_expiry: Duration,
+}
+
+impl AuthService {
+    /// Create a new authentication service
+    pub fn new(config: &Config) -> Self {
+        let token_expiry = Duration::from_secs(config.token_expiry_hours * 60 * 60);
+        let refresh_expiry = Duration::from_secs(config.token_expiry_hours * 60 * 60 * 24 * 7); // 7 days
+        
         Self {
-            name: name.to_string(),
-            permissions: HashSet::new(),
+            jwt_secret: config.jwt_secret.clone(),
+            refresh_secret: config.refresh_secret.clone(),
+            token_expiry,
+            refresh_expiry,
         }
     }
     
-    pub fn add_permission(&mut self, permission: &str) {
-        self.permissions.insert(permission.to_string());
+    /// Generate a JWT token for a user
+    pub fn generate_token(&self, user_id: Uuid, roles: Vec<String>) -> Result<String, AuthError> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_secs();
+        
+        let claims = Claims {
+            sub: user_id.to_string(),
+            iat: now,
+            exp: now + self.token_expiry.as_secs(),
+            roles,
+        };
+        
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
+        )?;
+        
+        debug!("Generated JWT token for user {}", user_id);
+        
+        Ok(token)
     }
     
-    pub fn has_permission(&self, permission: &str) -> bool {
-        self.permissions.contains(permission)
+    /// Generate a refresh token for a user
+    pub fn generate_refresh_token(&self, user_id: Uuid) -> Result<String, AuthError> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_secs();
+        
+        let claims = Claims {
+            sub: user_id.to_string(),
+            iat: now,
+            exp: now + self.refresh_expiry.as_secs(),
+            roles: vec![],
+        };
+        
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.refresh_secret.as_bytes()),
+        )?;
+        
+        debug!("Generated refresh token for user {}", user_id);
+        
+        Ok(token)
+    }
+    
+    /// Validate a JWT token
+    pub fn validate_token(&self, token: &str) -> Result<Claims, AuthError> {
+        let validation = Validation::default();
+        
+        let token_data = decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(self.jwt_secret.as_bytes()),
+            &validation,
+        ).map_err(|e| {
+            error!("JWT validation error: {}", e);
+            AuthError::InvalidToken
+        })?;
+        
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_secs();
+        
+        if token_data.claims.exp < now {
+            return Err(AuthError::TokenExpired);
+        }
+        
+        Ok(token_data.claims)
+    }
+    
+    /// Validate a refresh token
+    pub fn validate_refresh_token(&self, token: &str) -> Result<Claims, AuthError> {
+        let validation = Validation::default();
+        
+        let token_data = decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(self.refresh_secret.as_bytes()),
+            &validation,
+        ).map_err(|e| {
+            error!("Refresh token validation error: {}", e);
+            AuthError::InvalidToken
+        })?;
+        
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_secs();
+        
+        if token_data.claims.exp < now {
+            return Err(AuthError::TokenExpired);
+        }
+        
+        Ok(token_data.claims)
+    }
+    
+    /// Get user ID from JWT token
+    pub fn get_user_id_from_token(&self, token: &str) -> Result<Uuid, AuthError> {
+        let claims = self.validate_token(token)?;
+        
+        Uuid::parse_str(&claims.sub).map_err(|_| {
+            error!("Invalid user ID in token: {}", claims.sub);
+            AuthError::InvalidToken
+        })
+    }
+    
+    /// Get user roles from JWT token
+    pub fn get_user_roles_from_token(&self, token: &str) -> Result<Vec<String>, AuthError> {
+        let claims = self.validate_token(token)?;
+        
+        Ok(claims.roles)
     }
 }
 
-pub struct PermissionService {
-    roles: std::collections::HashMap<String, Role>,
-    user_roles: std::collections::HashMap<Uuid, HashSet<String>>,
-}
-
-impl PermissionService {
-    pub fn new() -> Self {
-        Self {
-            roles: std::collections::HashMap::new(),
-            user_roles: std::collections::HashMap::new(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    fn create_test_config() -> Config {
+        Config {
+            jwt_secret: "test_jwt_secret".to_string(),
+            refresh_secret: "test_refresh_secret".to_string(),
+            token_expiry_hours: 1,
+            ..Config::default()
         }
     }
     
-    pub fn add_role(&mut self, role: Role) {
-        self.roles.insert(role.name.clone(), role);
+    #[test]
+    fn test_generate_and_validate_token() {
+        let config = create_test_config();
+        let auth_service = AuthService::new(&config);
+        
+        let user_id = Uuid::new_v4();
+        let roles = vec!["user".to_string(), "admin".to_string()];
+        
+        let token = auth_service.generate_token(user_id, roles.clone()).unwrap();
+        
+        let claims = auth_service.validate_token(&token).unwrap();
+        
+        assert_eq!(claims.sub, user_id.to_string());
+        assert_eq!(claims.roles, roles);
     }
     
-    pub fn assign_role_to_user(&mut self, user_id: Uuid, role_name: &str) {
-        self.user_roles.entry(user_id)
-            .or_insert_with(HashSet::new)
-            .insert(role_name.to_string());
+    #[test]
+    fn test_generate_and_validate_refresh_token() {
+        let config = create_test_config();
+        let auth_service = AuthService::new(&config);
+        
+        let user_id = Uuid::new_v4();
+        
+        let token = auth_service.generate_refresh_token(user_id).unwrap();
+        
+        let claims = auth_service.validate_refresh_token(&token).unwrap();
+        
+        assert_eq!(claims.sub, user_id.to_string());
+        assert!(claims.roles.is_empty());
     }
     
-    pub fn user_has_permission(&self, user_id: Uuid, permission: &str) -> bool {
-        if let Some(user_roles) = self.user_roles.get(&user_id) {
-            for role_name in user_roles {
-                if let Some(role) = self.roles.get(role_name) {
-                    if role.has_permission(permission) {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
+    #[test]
+    fn test_get_user_id_from_token() {
+        let config = create_test_config();
+        let auth_service = AuthService::new(&config);
+        
+        let user_id = Uuid::new_v4();
+        let roles = vec!["user".to_string()];
+        
+        let token = auth_service.generate_token(user_id, roles).unwrap();
+        
+        let result = auth_service.get_user_id_from_token(&token).unwrap();
+        
+        assert_eq!(result, user_id);
+    }
+    
+    #[test]
+    fn test_get_user_roles_from_token() {
+        let config = create_test_config();
+        let auth_service = AuthService::new(&config);
+        
+        let user_id = Uuid::new_v4();
+        let roles = vec!["user".to_string(), "admin".to_string()];
+        
+        let token = auth_service.generate_token(user_id, roles.clone()).unwrap();
+        
+        let result = auth_service.get_user_roles_from_token(&token).unwrap();
+        
+        assert_eq!(result, roles);
     }
 }
