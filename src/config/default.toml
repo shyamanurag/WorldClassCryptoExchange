@@ -1,0 +1,28 @@
+tomlenvironment = "development"
+
+[database]
+url = "postgres://postgres:password@localhost:5432/crypto_exchange"
+max_connections = 20
+connection_timeout = 30
+
+[api]
+host = "0.0.0.0"
+port = 8080
+cors_allowed_origins = ["http://localhost:3000"]
+rate_limit_requests_per_minute = 60
+
+[security]
+jwt_secret = "development_secret_change_in_production"
+token_expiration_seconds = 3600
+
+[metrics]
+enabled = true
+prometheus_endpoint = "0.0.0.0:9090"
+
+[logging]
+level = "debug"
+file_path = "logs/app.log"
+
+[trading]
+symbols = ["BTC/USD", "ETH/USD", "SOL/USD"]
+fee_rate = 0.001
